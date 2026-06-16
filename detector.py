@@ -1,11 +1,13 @@
 import cv2
 
 
-def detect_result(image_path):
-    screenshot = cv2.imread(
-        image_path,
-        cv2.IMREAD_GRAYSCALE
-    )
+def detect_result(screenshot):
+
+    if len(screenshot.shape) == 3:
+        screenshot = cv2.cvtColor(
+            screenshot,
+            cv2.COLOR_BGR2GRAY
+        )
 
     win_template = cv2.imread(
         "templates/win.png",
@@ -17,9 +19,13 @@ def detect_result(image_path):
         cv2.IMREAD_GRAYSCALE
     )
 
-    print("screenshot:", screenshot.shape if screenshot is not None else None)
-    print("win:", win_template.shape if win_template is not None else None)
-    print("lose:", lose_template.shape if lose_template is not None else None)
+    if win_template is None:
+        print("templates/win.png が見つかりません")
+        return "NONE"
+
+    if lose_template is None:
+        print("templates/lose.png が見つかりません")
+        return "NONE"
 
     win_result = cv2.matchTemplate(
         screenshot,
@@ -31,13 +37,10 @@ def detect_result(image_path):
         screenshot,
         lose_template,
         cv2.TM_CCOEFF_NORMED
-    ) 
+    )
 
     win_score = win_result.max()
     lose_score = lose_result.max()
-
-    print(f"WIN score: {win_score:.3f}")
-    print(f"LOSE score: {lose_score:.3f}")
 
     threshold = 0.7
 
@@ -48,11 +51,3 @@ def detect_result(image_path):
         return "LOSE"
 
     return "NONE"
-
-
-if __name__ == "__main__":
-    result = detect_result(
-        "screenshots/test.png"
-    )
-
-    print(result)
