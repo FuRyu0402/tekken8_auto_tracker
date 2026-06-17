@@ -30,6 +30,9 @@ if __name__ == "__main__":
 
     previous_result = "NONE"
 
+    win_count = 0
+    lose_count = 0
+
     while True:
 
         image = capture_screen()
@@ -37,8 +40,19 @@ if __name__ == "__main__":
         result = detect_result(image)
 
         if result != "NONE" and result != previous_result:
-            print(result)
+
+            if result == "WIN":
+                win_count += 1
+
+            elif result == "LOSE":
+                lose_count += 1
+
+            print(
+                f"{result} | "
+                f"WIN: {win_count} "
+                f"LOSE: {lose_count}"
+            )
 
         previous_result = result
 
-        time.sleep(1)
+        time.sleep(0.2)
