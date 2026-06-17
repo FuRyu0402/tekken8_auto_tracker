@@ -28,12 +28,17 @@ if __name__ == "__main__":
 
     print("monitoring started")
 
+    previous_result = "NONE"
+
     while True:
 
         image = capture_screen()
 
         result = detect_result(image)
 
-        print(result)
+        if result != "NONE" and result != previous_result:
+            print(result)
+
+        previous_result = result
 
         time.sleep(1)
