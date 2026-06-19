@@ -9,6 +9,11 @@ def detect_result(screenshot):
             cv2.COLOR_BGR2GRAY
         )
 
+    roi = screenshot[
+        350:750,
+        400:1500
+    ]
+
     win_template = cv2.imread(
         "templates/win.png",
         cv2.IMREAD_GRAYSCALE
@@ -28,19 +33,25 @@ def detect_result(screenshot):
         return "NONE"
 
     win_result = cv2.matchTemplate(
-        screenshot,
+        roi,
         win_template,
         cv2.TM_CCOEFF_NORMED
     )
 
     lose_result = cv2.matchTemplate(
-        screenshot,
+        roi,
         lose_template,
         cv2.TM_CCOEFF_NORMED
     )
 
     win_score = win_result.max()
     lose_score = lose_result.max()
+
+    if win_score > 0.5:
+        print(f"WIN score: {win_score:.3f}")
+
+    if lose_score > 0.5:
+        print(f"LOSE score: {lose_score:.3f}")
 
     threshold = 0.7
 
