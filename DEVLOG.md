@@ -108,3 +108,72 @@
 画面キャプチャ、リアルタイム監視、重複検出防止、戦績カウントの基礎部分は今後も利用できる。
 
 今後は「画面取得部分」は維持し、「判定エンジン」をテンプレートマッチングからOCRへ差し替える方針で進める。
+
+## 2026-06-19
+
+### 画像分類モデル方式への移行
+
+WIN / LOSE / NONE の3分類を目的として、テンプレートマッチング方式から画像分類モデル方式への移行を開始。
+
+### データ収集
+
+* `dataset_collector.py` を作成
+* 画面中央ROIを `dataset/raw` に保存する方式を実装
+* ROIサイズを調整
+
+  * `ROI_WIDTH_RATIO = 0.55`
+  * `ROI_HEIGHT_RATIO = 0.32`
+  * `ROI_Y_OFFSET_RATIO = 0.02`
+* 収集間隔を短くし、WIN / LOSE の表示フレームを拾いやすくした
+* 収集画像を `win / lose / none` に手動分類
+
+### ラベル分類支援
+
+* `label_dataset.py` を作成
+* キー操作で `win / lose / none` に画像を振り分ける仕組みを実装
+* 手動ドラッグより高速に分類できるようにした
+
+### 学習処理
+
+* `train_classifier.py` を作成
+* HOG特徴量 + LinearSVC による分類モデルを実装
+* `none` は枚数が多いため、通常学習では最大120枚をランダム使用
+* `hard_none` を追加し、誤判定しやすいNONE画像を必ず学習に含めるようにした
+* 学習済みモデルを `models/win_lose_none_hog_svm.pkl` に保存
+
+### 静止画像検証
+
+初回学習後、以下の結果を確認。
+
+* `win`: 48 / 48 正解
+* `lose`: 25 / 25 正解
+* `none`: 200枚中 192枚正解
+
+`none` の誤判定画像を `dataset/hard_none` に追加し、再学習を実施。
+
+再学習後の結果。
+
+* `win`: 48 / 48 正解
+* `lose`: 25 / 25 正解
+* `none`: 200枚中 199枚正解
+
+`hard_none` の追加により、KO / FINAL ROUND / 薄い残像 / 中央UI などの誤判定が改善した。
+
+### 判定処理
+
+* `classifier_detector.py` を作成
+* 学習済みモデルを読み込み、画像またはフォルダを分類できるようにした
+* `raw_label` と `final_label` を分け、スコア差が小さいWIN/LOSEはNONEに落とす安全判定を追加
+* 誤判定画像を `debug_classifier/misclassified` にコピーする仕組みを追加
+
+### リアルタイム判定
+
+* `capture_classifier.py` を作成
+* 画面キャプチャからROIを切り出し、分類モデルでリアルタイム判定する入口を実装
+* 連続判定による安定化処理を追加
+
+  * `STABLE_REQUIRED_COUNT = 3`
+  * `NONE_RESET_REQUIRED_COUNT = 3`
+  * `EVENT_COOLDOWN_SECONDS = 8.0`
+* 現時点ではCSV記録は未実装
+* 次回は実ゲーム中に `capture_classifier.py` を動かし、WIN / LOSE が検出されるか確認する

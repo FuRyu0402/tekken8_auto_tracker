@@ -91,3 +91,10 @@ output/
 outputs/
 tmp/
 temp/
+
+# Hard negative dataset images
+dataset/hard_none/*
+!dataset/hard_none/.gitkeep
+
+# Classifier debug outputs
+debug_classifier/
