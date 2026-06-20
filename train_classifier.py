@@ -224,7 +224,7 @@ def train_model(X, y):
         LinearSVC(
             class_weight="balanced",
             random_state=RANDOM_SEED,
-            max_iter=10000,
+            max_iter=50000,
         ),
     )
 

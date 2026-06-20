@@ -30,8 +30,8 @@ ROI_Y_OFFSET_RATIO = 0.02
 
 # WIN / LOSE の誤判定を減らすための安全判定
 USE_SAFE_THRESHOLD = True
-MIN_WIN_LOSE_SCORE = 0.0
-MIN_WIN_LOSE_MARGIN = 0.5
+MIN_WIN_LOSE_SCORE = 1.0
+MIN_WIN_LOSE_MARGIN = 1.0
 
 # 何回連続で同じ WIN / LOSE が出たら確定扱いにするか
 # 誤判定対策として、1回だけでは確定しません。
