@@ -20,7 +20,7 @@ MONITOR_INDEX = 2
 
 # 判定間隔
 # 0.25秒なら1秒に4回判定します。
-DETECT_INTERVAL_SECONDS = 0.25
+DETECT_INTERVAL_SECONDS = 0.20
 
 # ROI設定
 # dataset_collector.py と同じ設定にします。
@@ -30,12 +30,12 @@ ROI_Y_OFFSET_RATIO = 0.02
 
 # WIN / LOSE の誤判定を減らすための安全判定
 USE_SAFE_THRESHOLD = True
-MIN_WIN_LOSE_SCORE = 1.0
-MIN_WIN_LOSE_MARGIN = 1.0
+MIN_WIN_LOSE_SCORE = 1.5
+MIN_WIN_LOSE_MARGIN = 1.5
 
 # 何回連続で同じ WIN / LOSE が出たら確定扱いにするか
 # 誤判定対策として、1回だけでは確定しません。
-STABLE_REQUIRED_COUNT = 3
+STABLE_REQUIRED_COUNT = 2
 
 # NONE が何回続いたら、次の勝敗検出を許可するか
 NONE_RESET_REQUIRED_COUNT = 3
