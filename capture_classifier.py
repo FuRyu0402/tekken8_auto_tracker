@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 from result_logger import save_result
+from stats_calculator import calculate_stats, load_match_records, print_stats
 
 import cv2
 import joblib
@@ -21,7 +22,7 @@ MODEL_PATH = Path("models") / "win_lose_none_hog_svm.pkl"
 MONITOR_INDEX = 2
 
 # 判定間隔
-# 0.25秒なら1秒に4回判定します。
+# 0.20秒なら1秒に5回判定します。
 DETECT_INTERVAL_SECONDS = 0.20
 
 # ROI設定
@@ -302,6 +303,31 @@ def format_scores(scores):
     return " ".join(parts)
 
 
+def print_current_stats():
+    """
+    CSVに保存済みの試合結果を読み込み、現在の戦績を表示する。
+    CSV保存後に呼び出す想定。
+    """
+    try:
+        records, duplicate_rows_skipped = load_match_records()
+
+        if not records:
+            print("[STATS] 集計できるWIN/LOSE記録がありません。")
+            return
+
+        stats = calculate_stats(
+            records=records,
+            duplicate_rows_skipped=duplicate_rows_skipped,
+        )
+
+        print_stats(stats)
+
+    except FileNotFoundError:
+        print("[STATS ERROR] match_results.csv が見つかりません。")
+    except Exception as e:
+        print(f"[STATS ERROR] 戦績集計に失敗しました: {e}")
+
+
 def draw_preview(frame, roi_box, result, state):
     preview = frame.copy()
 
@@ -459,6 +485,9 @@ def main():
                             scores=scores,
                             timestamp=timestamp,
                         )
+
+                        print_current_stats()
+
                     except Exception as e:
                         print(f"[LOGGER ERROR] CSV保存に失敗しました: {e}")
 
