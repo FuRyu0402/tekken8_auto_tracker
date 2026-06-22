@@ -2,6 +2,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from result_logger import save_result
+
 import cv2
 import joblib
 import mss
@@ -408,6 +410,10 @@ def main():
 
                 current_time = time.time()
 
+                # 前回の検出イベントを次のループに持ち越さない
+                detected_event = None
+                result = last_result
+
                 if current_time - last_detect_time >= DETECT_INTERVAL_SECONDS:
                     result = classify_roi(
                         roi=roi,
@@ -423,15 +429,38 @@ def main():
                     last_result = result
                     last_detect_time = current_time
 
-                    if detected_event is not None:
-                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        print("")
-                        print("======================================")
-                        print(f"[DETECTED] {timestamp} -> {detected_event.upper()}")
-                        print(f"reason: {result['reason']}")
-                        print(f"scores: {format_scores(result['scores'])}")
-                        print("======================================")
-                        print("")
+                if detected_event is not None:
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                    scores = result["scores"]
+                    detected_label = detected_event.lower()
+
+                    score = scores.get(detected_label)
+
+                    sorted_scores = sorted(scores.values(), reverse=True)
+                    if len(sorted_scores) >= 2:
+                        margin = sorted_scores[0] - sorted_scores[1]
+                    else:
+                        margin = 0.0
+
+                    print("")
+                    print("======================================")
+                    print(f"[DETECTED] {timestamp} -> {detected_event.upper()}")
+                    print(f"reason: {result['reason']}")
+                    print(f"scores: {format_scores(result['scores'])}")
+                    print("======================================")
+                    print("")
+
+                    try:
+                        save_result(
+                            result=detected_event.upper(),
+                            score=score,
+                            margin=margin,
+                            scores=scores,
+                            timestamp=timestamp,
+                        )
+                    except Exception as e:
+                        print(f"[LOGGER ERROR] CSV保存に失敗しました: {e}")
 
                 if SHOW_PREVIEW:
                     preview = draw_preview(

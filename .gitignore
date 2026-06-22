@@ -98,3 +98,6 @@ dataset/hard_none/*
 
 # Classifier debug outputs
 debug_classifier/
+
+# 実行ログ
+logs/
