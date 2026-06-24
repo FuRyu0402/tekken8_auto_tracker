@@ -101,3 +101,6 @@ debug_classifier/
 
 # 実行ログ
 logs/
+
+# デバッグ画像
+debug_capture/

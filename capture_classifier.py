@@ -2,6 +2,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from debug_image_saver import (
+    save_candidate_roi,
+    save_detection_roi,
+    save_rejected_roi,
+)
 from result_logger import save_result
 from stats_calculator import calculate_stats, load_match_records, print_stats
 
@@ -22,8 +27,8 @@ MODEL_PATH = Path("models") / "win_lose_none_hog_svm.pkl"
 MONITOR_INDEX = 2
 
 # 判定間隔
-# 0.20秒なら1秒に5回判定します。
-DETECT_INTERVAL_SECONDS = 0.20
+# 0.15秒なら1秒に約6〜7回判定します。
+DETECT_INTERVAL_SECONDS = 0.15
 
 # ROI設定
 # dataset_collector.py と同じ設定にします。
@@ -45,6 +50,17 @@ NONE_RESET_REQUIRED_COUNT = 3
 
 # 同じ勝敗画面で連続記録しないための最低クールダウン秒数
 EVENT_COOLDOWN_SECONDS = 8.0
+
+# candidates / rejected の保存設定
+SAVE_CANDIDATE_IMAGES = True
+SAVE_REJECTED_IMAGES = False
+
+# 保存しすぎ防止のため、同じ種類の保存は最低この秒数だけ空ける
+DEBUG_IMAGE_SAVE_INTERVAL_SECONDS = 5.0
+
+# candidates / rejected として保存する最低スコア
+MIN_CANDIDATE_SAVE_SCORE = 1.5
+MIN_REJECTED_SAVE_SCORE = 1.5
 
 # プレビューを表示するか
 SHOW_PREVIEW = True
@@ -183,8 +199,8 @@ def apply_safe_threshold(raw_label, class_names, scores):
 
     score_pairs.sort(key=lambda x: x[1], reverse=True)
 
-    best_label, best_score = score_pairs[0]
-    second_label, second_score = score_pairs[1]
+    _best_label, best_score = score_pairs[0]
+    _second_label, second_score = score_pairs[1]
 
     margin = best_score - second_score
 
@@ -243,14 +259,27 @@ def classify_roi(roi, payload, hog):
     }
 
 
+def get_score_and_margin(result, label):
+    scores = result["scores"]
+    label = label.lower()
+
+    score = scores.get(label)
+
+    sorted_scores = sorted(scores.values(), reverse=True)
+
+    if len(sorted_scores) >= 2:
+        margin = sorted_scores[0] - sorted_scores[1]
+    else:
+        margin = 0.0
+
+    return score, margin
+
+
 # ==============================
 # イベント確定ロジック
 # ==============================
 
-def update_event_state(
-    result,
-    state,
-):
+def update_event_state(result, state):
     final_label = result["final_label"]
     current_time = time.time()
 
@@ -291,7 +320,7 @@ def update_event_state(
 
 
 # ==============================
-# 表示
+# 表示・保存
 # ==============================
 
 def format_scores(scores):
@@ -327,6 +356,169 @@ def print_current_stats():
     except Exception as e:
         print(f"[STATS ERROR] 戦績集計に失敗しました: {e}")
 
+
+def print_detected_event(timestamp, detected_event, result):
+    print("")
+    print("======================================")
+    print(f"[DETECTED] {timestamp} -> {detected_event.upper()}")
+    print(f"reason: {result['reason']}")
+    print(f"scores: {format_scores(result['scores'])}")
+    print("======================================")
+    print("")
+
+
+def save_detection_debug_image(roi, detected_event, score, margin, reason):
+    try:
+        saved_image_path = save_detection_roi(
+            image=roi,
+            label=detected_event,
+            score=score,
+            margin=margin,
+            reason=reason,
+        )
+
+        print(f"[DEBUG IMAGE] detection ROI saved: {saved_image_path}")
+
+    except Exception as e:
+        print(f"[DEBUG IMAGE ERROR] detection ROI保存に失敗しました: {e}")
+
+
+def save_candidate_debug_image(roi, label, score, margin, reason):
+    try:
+        saved_image_path = save_candidate_roi(
+            image=roi,
+            label=label,
+            score=score,
+            margin=margin,
+            reason=reason,
+        )
+
+        print(f"[DEBUG IMAGE] candidate ROI saved: {saved_image_path}")
+
+    except Exception as e:
+        print(f"[DEBUG IMAGE ERROR] candidate ROI保存に失敗しました: {e}")
+
+
+def save_rejected_debug_image(roi, label, score, margin, reason):
+    try:
+        saved_image_path = save_rejected_roi(
+            image=roi,
+            label=label,
+            score=score,
+            margin=margin,
+            reason=reason,
+        )
+
+        print(f"[DEBUG IMAGE] rejected ROI saved: {saved_image_path}")
+
+    except Exception as e:
+        print(f"[DEBUG IMAGE ERROR] rejected ROI保存に失敗しました: {e}")
+
+
+def can_save_debug_image(debug_save_state, key):
+    current_time = time.time()
+    last_save_time = debug_save_state.get(key, 0.0)
+
+    if current_time - last_save_time < DEBUG_IMAGE_SAVE_INTERVAL_SECONDS:
+        return False
+
+    debug_save_state[key] = current_time
+    return True
+
+
+def maybe_save_candidate_or_rejected(
+    roi,
+    result,
+    detected_event,
+    state,
+    debug_save_state,
+):
+    """
+    DETECTEDにはならなかったが、WIN/LOSEに近いROIを保存する。
+
+    candidates:
+        final_label が win/lose だが、detected_event にはならなかった画像。
+
+    rejected:
+        raw_label は win/lose だが、score/margin不足で final_label が none になった画像。
+    """
+    if detected_event is not None:
+        return
+
+    # すでに1試合分を検出済みの間は、同じリザルト画面を候補として保存しない
+    if state["event_active"]:
+        return
+
+    raw_label = result["raw_label"]
+    final_label = result["final_label"]
+    reason = result["reason"]
+
+    if (
+        SAVE_REJECTED_IMAGES
+        and raw_label in ["win", "lose"]
+        and final_label == "none"
+    ):
+        score, margin = get_score_and_margin(
+            result=result,
+            label=raw_label,
+        )
+
+        if score is not None and score >= MIN_REJECTED_SAVE_SCORE:
+            key = f"rejected_{raw_label}"
+
+            if can_save_debug_image(debug_save_state, key):
+                save_rejected_debug_image(
+                    roi=roi,
+                    label=raw_label,
+                    score=score,
+                    margin=margin,
+                    reason=reason,
+                )
+
+        return
+
+    if (
+        SAVE_CANDIDATE_IMAGES
+        and final_label in ["win", "lose"]
+        and state["stable_count"] == 1
+    ):
+        score, margin = get_score_and_margin(
+            result=result,
+            label=final_label,
+        )
+
+        if score is not None and score >= MIN_CANDIDATE_SAVE_SCORE:
+            key = f"candidate_{final_label}"
+
+            if can_save_debug_image(debug_save_state, key):
+                save_candidate_debug_image(
+                    roi=roi,
+                    label=final_label,
+                    score=score,
+                    margin=margin,
+                    reason=reason,
+                )
+
+
+def save_match_result_to_csv(detected_event, score, margin, scores, timestamp):
+    try:
+        save_result(
+            result=detected_event.upper(),
+            score=score,
+            margin=margin,
+            scores=scores,
+            timestamp=timestamp,
+        )
+
+        print_current_stats()
+
+    except Exception as e:
+        print(f"[LOGGER ERROR] CSV保存に失敗しました: {e}")
+
+
+# ==============================
+# プレビュー表示
+# ==============================
 
 def draw_preview(frame, roi_box, result, state):
     preview = frame.copy()
@@ -387,6 +579,29 @@ def resize_for_display(image, display_width=960):
     return resized
 
 
+def show_preview(frame, roi_box, result, state):
+    if not SHOW_PREVIEW:
+        return False
+
+    preview = draw_preview(
+        frame=frame,
+        roi_box=roi_box,
+        result=result,
+        state=state,
+    )
+
+    preview_resized = resize_for_display(preview)
+    cv2.imshow(WINDOW_NAME, preview_resized)
+
+    key = cv2.waitKey(1) & 0xFF
+
+    if key == ord("q"):
+        print("[INFO] Qキーで終了しました。")
+        return True
+
+    return False
+
+
 # ==============================
 # メイン処理
 # ==============================
@@ -413,6 +628,8 @@ def main():
         "event_active": False,
         "last_event_time": 0.0,
     }
+
+    debug_save_state = {}
 
     last_detect_time = 0.0
     last_result = {
@@ -452,61 +669,56 @@ def main():
                         state=state,
                     )
 
+                    maybe_save_candidate_or_rejected(
+                        roi=roi,
+                        result=result,
+                        detected_event=detected_event,
+                        state=state,
+                        debug_save_state=debug_save_state,
+                    )
+
                     last_result = result
                     last_detect_time = current_time
 
                 if detected_event is not None:
                     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                    scores = result["scores"]
-                    detected_label = detected_event.lower()
-
-                    score = scores.get(detected_label)
-
-                    sorted_scores = sorted(scores.values(), reverse=True)
-                    if len(sorted_scores) >= 2:
-                        margin = sorted_scores[0] - sorted_scores[1]
-                    else:
-                        margin = 0.0
-
-                    print("")
-                    print("======================================")
-                    print(f"[DETECTED] {timestamp} -> {detected_event.upper()}")
-                    print(f"reason: {result['reason']}")
-                    print(f"scores: {format_scores(result['scores'])}")
-                    print("======================================")
-                    print("")
-
-                    try:
-                        save_result(
-                            result=detected_event.upper(),
-                            score=score,
-                            margin=margin,
-                            scores=scores,
-                            timestamp=timestamp,
-                        )
-
-                        print_current_stats()
-
-                    except Exception as e:
-                        print(f"[LOGGER ERROR] CSV保存に失敗しました: {e}")
-
-                if SHOW_PREVIEW:
-                    preview = draw_preview(
-                        frame=frame,
-                        roi_box=roi_box,
-                        result=last_result,
-                        state=state,
+                    score, margin = get_score_and_margin(
+                        result=result,
+                        label=detected_event,
                     )
 
-                    preview_resized = resize_for_display(preview)
-                    cv2.imshow(WINDOW_NAME, preview_resized)
+                    print_detected_event(
+                        timestamp=timestamp,
+                        detected_event=detected_event,
+                        result=result,
+                    )
 
-                    key = cv2.waitKey(1) & 0xFF
+                    save_detection_debug_image(
+                        roi=roi,
+                        detected_event=detected_event,
+                        score=score,
+                        margin=margin,
+                        reason=result["reason"],
+                    )
 
-                    if key == ord("q"):
-                        print("[INFO] Qキーで終了しました。")
-                        break
+                    save_match_result_to_csv(
+                        detected_event=detected_event,
+                        score=score,
+                        margin=margin,
+                        scores=result["scores"],
+                        timestamp=timestamp,
+                    )
+
+                should_quit = show_preview(
+                    frame=frame,
+                    roi_box=roi_box,
+                    result=last_result,
+                    state=state,
+                )
+
+                if should_quit:
+                    break
 
     except KeyboardInterrupt:
         print("")

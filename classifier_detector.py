@@ -22,11 +22,11 @@ USE_SAFE_THRESHOLD = True
 # win / lose と判定するための最低スコア
 # 低すぎると薄い残像も拾います。
 # 高すぎると取りこぼします。
-MIN_WIN_LOSE_SCORE = 1.0
+MIN_WIN_LOSE_SCORE = 1.5
 
 # 1位スコアと2位スコアの差
 # 差が小さい場合は曖昧なので none にします。
-MIN_WIN_LOSE_MARGIN = 1.0
+MIN_WIN_LOSE_MARGIN = 1.5
 
 # 誤判定画像をコピーして確認しやすくする
 SAVE_MISCLASSIFIED = True
