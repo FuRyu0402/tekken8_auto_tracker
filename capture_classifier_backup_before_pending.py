@@ -51,25 +51,6 @@ NONE_RESET_REQUIRED_COUNT = 3
 # 同じ勝敗画面で連続記録しないための最低クールダウン秒数
 EVENT_COOLDOWN_SECONDS = 8.0
 
-# ==============================
-# pending救済ロジック設定
-# ==============================
-# 1回だけ出た高スコアWIN/LOSEを数秒だけ保留し、
-# 短時間内に同じ候補がもう一度出た場合に確定する。
-USE_PENDING_RESCUE = True
-
-# pendingとして扱う最低スコアとマージン
-# 通常の安全判定 1.5 / 1.5 より厳しめにする
-PENDING_MIN_SCORE = 1.5
-PENDING_MIN_MARGIN = 1.8
-
-# pending候補を保持する秒数
-PENDING_EXPIRE_SECONDS = 6.0
-
-# pending候補が何回出たら確定するか
-# 2なら「1回だけでは記録しない」
-PENDING_REQUIRED_COUNT = 2
-
 # candidates / rejected の保存設定
 SAVE_CANDIDATE_IMAGES = True
 SAVE_REJECTED_IMAGES = False
@@ -298,89 +279,11 @@ def get_score_and_margin(result, label):
 # イベント確定ロジック
 # ==============================
 
-def clear_pending_state(state):
-    state["pending_label"] = None
-    state["pending_count"] = 0
-    state["pending_first_time"] = 0.0
-    state["pending_last_time"] = 0.0
-
-
-def is_pending_candidate(result):
-    """
-    pending救済の対象にしてよい高信頼WIN/LOSEかを判定する。
-    1回だけでは記録せず、短時間内に同じ候補が再度出た場合だけ救済する。
-    """
-    if not USE_PENDING_RESCUE:
-        return False
-
-    final_label = result["final_label"]
-
-    if final_label not in ["win", "lose"]:
-        return False
-
-    score, margin = get_score_and_margin(
-        result=result,
-        label=final_label,
-    )
-
-    if score is None:
-        return False
-
-    if score < PENDING_MIN_SCORE:
-        return False
-
-    if margin < PENDING_MIN_MARGIN:
-        return False
-
-    return True
-
-
-def update_pending_state(result, state, current_time):
-    """
-    高信頼候補をpendingとして保持する。
-    連続していなくても、一定秒数以内に同じ候補が再度出たらcountを進める。
-    """
-    final_label = result["final_label"]
-
-    # 古いpendingは破棄
-    if state["pending_label"] is not None:
-        elapsed = current_time - state["pending_first_time"]
-
-        if elapsed > PENDING_EXPIRE_SECONDS:
-            clear_pending_state(state)
-
-    if not is_pending_candidate(result):
-        return False, state
-
-    # 同じ候補が期限内に再度出た場合
-    if state["pending_label"] == final_label:
-        state["pending_count"] += 1
-        state["pending_last_time"] = current_time
-
-    # 新しい候補の場合
-    else:
-        state["pending_label"] = final_label
-        state["pending_count"] = 1
-        state["pending_first_time"] = current_time
-        state["pending_last_time"] = current_time
-
-    pending_ready = state["pending_count"] >= PENDING_REQUIRED_COUNT
-
-    return pending_ready, state
-
-
 def update_event_state(result, state):
     final_label = result["final_label"]
     current_time = time.time()
 
     detected_event = None
-
-    # pendingが古くなっていたら消す
-    if state["pending_label"] is not None:
-        elapsed = current_time - state["pending_first_time"]
-
-        if elapsed > PENDING_EXPIRE_SECONDS:
-            clear_pending_state(state)
 
     if final_label in ["win", "lose"]:
         state["none_count"] = 0
@@ -396,33 +299,14 @@ def update_event_state(result, state):
             >= EVENT_COOLDOWN_SECONDS
         )
 
-        normal_ready = (
-            state["stable_count"] >= STABLE_REQUIRED_COUNT
-        )
-
-        pending_ready, state = update_pending_state(
-            result=result,
-            state=state,
-            current_time=current_time,
-        )
-
         if (
-            not state["event_active"]
+            state["stable_count"] >= STABLE_REQUIRED_COUNT
+            and not state["event_active"]
             and cooldown_ok
-            and (normal_ready or pending_ready)
         ):
             detected_event = final_label
             state["event_active"] = True
             state["last_event_time"] = current_time
-
-            if normal_ready:
-                state["last_detect_reason"] = "normal_stable"
-            elif pending_ready:
-                state["last_detect_reason"] = "pending_rescue"
-            else:
-                state["last_detect_reason"] = "unknown"
-
-            clear_pending_state(state)
 
     else:
         state["none_count"] += 1
@@ -473,11 +357,10 @@ def print_current_stats():
         print(f"[STATS ERROR] 戦績集計に失敗しました: {e}")
 
 
-def print_detected_event(timestamp, detected_event, result, state):
+def print_detected_event(timestamp, detected_event, result):
     print("")
     print("======================================")
     print(f"[DETECTED] {timestamp} -> {detected_event.upper()}")
-    print(f"detect_reason: {state.get('last_detect_reason', '')}")
     print(f"reason: {result['reason']}")
     print(f"scores: {format_scores(result['scores'])}")
     print("======================================")
@@ -655,21 +538,12 @@ def draw_preview(frame, roi_box, result, state):
     cv2.rectangle(preview, (x1, y1), (x2, y2), color, 2)
 
     line1 = f"raw={raw_label} final={final_label}"
-    line2 = (
-        f"stable={state['stable_label']} "
-        f"count={state['stable_count']} "
-        f"active={state['event_active']}"
-    )
-    line3 = (
-        f"pending={state['pending_label']} "
-        f"count={state['pending_count']} "
-        f"reason={state['last_detect_reason']}"
-    )
-    line4 = result["reason"]
-    line5 = format_scores(result["scores"])
-    line6 = "Press Q to quit"
+    line2 = f"stable={state['stable_label']} count={state['stable_count']} active={state['event_active']}"
+    line3 = result["reason"]
+    line4 = format_scores(result["scores"])
+    line5 = "Press Q to quit"
 
-    lines = [line1, line2, line3, line4, line5, line6]
+    lines = [line1, line2, line3, line4, line5]
 
     y = 35
 
@@ -740,10 +614,6 @@ def main():
     print(f"判定間隔: {DETECT_INTERVAL_SECONDS} 秒")
     print(f"安定判定回数: {STABLE_REQUIRED_COUNT}")
     print(f"クールダウン: {EVENT_COOLDOWN_SECONDS} 秒")
-    print(f"pending救済: {USE_PENDING_RESCUE}")
-    print(f"pending条件: score>={PENDING_MIN_SCORE}, margin>={PENDING_MIN_MARGIN}")
-    print(f"pending保持秒数: {PENDING_EXPIRE_SECONDS} 秒")
-    print(f"pending必要回数: {PENDING_REQUIRED_COUNT}")
     print("終了方法: プレビュー画面で Q、または PowerShell で Ctrl + C")
     print("======================================")
     print("")
@@ -757,13 +627,6 @@ def main():
         "none_count": 0,
         "event_active": False,
         "last_event_time": 0.0,
-
-        # pending救済用
-        "pending_label": None,
-        "pending_count": 0,
-        "pending_first_time": 0.0,
-        "pending_last_time": 0.0,
-        "last_detect_reason": "",
     }
 
     debug_save_state = {}
@@ -829,7 +692,6 @@ def main():
                         timestamp=timestamp,
                         detected_event=detected_event,
                         result=result,
-                        state=state,
                     )
 
                     save_detection_debug_image(
