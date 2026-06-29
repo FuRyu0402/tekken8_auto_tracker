@@ -58,18 +58,12 @@ EVENT_COOLDOWN_SECONDS = 8.0
 # 短時間内に同じ候補がもう一度出た場合に確定する。
 USE_PENDING_RESCUE = True
 
-# WIN用pending条件
-# WINは比較的安定しているため、誤検知を避けるために慎重なままにする。
-WIN_PENDING_MIN_SCORE = 2.5
-WIN_PENDING_MIN_MARGIN = 3.0
-
-# LOSE用pending条件
-# LOSEは取りこぼしが多いため、WINより少し緩めにする。
-LOSE_PENDING_MIN_SCORE = 1.5
-LOSE_PENDING_MIN_MARGIN = 1.8
+# pendingとして扱う最低スコアとマージン
+# 通常の安全判定 1.5 / 1.5 より厳しめにする
+PENDING_MIN_SCORE = 1.5
+PENDING_MIN_MARGIN = 1.8
 
 # pending候補を保持する秒数
-# 3ラウンド先取の実戦ではLOSE候補が間隔を空けて出ることがあるため、少し長めにする。
 PENDING_EXPIRE_SECONDS = 6.0
 
 # pending候補が何回出たら確定するか
@@ -311,23 +305,9 @@ def clear_pending_state(state):
     state["pending_last_time"] = 0.0
 
 
-def get_pending_thresholds(label):
-    """
-    WIN/LOSEごとにpending条件を返す。
-    WINは慎重、LOSEは取りこぼし救済のため少し緩め。
-    """
-    if label == "win":
-        return WIN_PENDING_MIN_SCORE, WIN_PENDING_MIN_MARGIN
-
-    if label == "lose":
-        return LOSE_PENDING_MIN_SCORE, LOSE_PENDING_MIN_MARGIN
-
-    return None, None
-
-
 def is_pending_candidate(result):
     """
-    pending救済の対象にしてよいWIN/LOSEかを判定する。
+    pending救済の対象にしてよい高信頼WIN/LOSEかを判定する。
     1回だけでは記録せず、短時間内に同じ候補が再度出た場合だけ救済する。
     """
     if not USE_PENDING_RESCUE:
@@ -338,11 +318,6 @@ def is_pending_candidate(result):
     if final_label not in ["win", "lose"]:
         return False
 
-    min_score, min_margin = get_pending_thresholds(final_label)
-
-    if min_score is None or min_margin is None:
-        return False
-
     score, margin = get_score_and_margin(
         result=result,
         label=final_label,
@@ -351,10 +326,10 @@ def is_pending_candidate(result):
     if score is None:
         return False
 
-    if score < min_score:
+    if score < PENDING_MIN_SCORE:
         return False
 
-    if margin < min_margin:
+    if margin < PENDING_MIN_MARGIN:
         return False
 
     return True
@@ -766,16 +741,7 @@ def main():
     print(f"安定判定回数: {STABLE_REQUIRED_COUNT}")
     print(f"クールダウン: {EVENT_COOLDOWN_SECONDS} 秒")
     print(f"pending救済: {USE_PENDING_RESCUE}")
-    print(
-        "WIN pending条件: "
-        f"score>={WIN_PENDING_MIN_SCORE}, "
-        f"margin>={WIN_PENDING_MIN_MARGIN}"
-    )
-    print(
-        "LOSE pending条件: "
-        f"score>={LOSE_PENDING_MIN_SCORE}, "
-        f"margin>={LOSE_PENDING_MIN_MARGIN}"
-    )
+    print(f"pending条件: score>={PENDING_MIN_SCORE}, margin>={PENDING_MIN_MARGIN}")
     print(f"pending保持秒数: {PENDING_EXPIRE_SECONDS} 秒")
     print(f"pending必要回数: {PENDING_REQUIRED_COUNT}")
     print("終了方法: プレビュー画面で Q、または PowerShell で Ctrl + C")
