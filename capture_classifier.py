@@ -78,10 +78,10 @@ PENDING_REQUIRED_COUNT = 2
 
 # candidates / rejected の保存設定
 SAVE_CANDIDATE_IMAGES = True
-SAVE_REJECTED_IMAGES = False
+SAVE_REJECTED_IMAGES = True
 
 # 保存しすぎ防止のため、同じ種類の保存は最低この秒数だけ空ける
-DEBUG_IMAGE_SAVE_INTERVAL_SECONDS = 5.0
+DEBUG_IMAGE_SAVE_INTERVAL_SECONDS = 1.0
 
 # candidates / rejected として保存する最低スコア
 MIN_CANDIDATE_SAVE_SCORE = 1.5
