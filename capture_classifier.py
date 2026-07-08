@@ -811,7 +811,7 @@ def main():
     }
 
     try:
-        with mss.mss() as sct:
+        with mss.MSS() as sct:
             monitor = get_monitor(sct)
 
             while True:
