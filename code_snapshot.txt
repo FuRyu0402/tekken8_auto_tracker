@@ -1,0 +1,1363 @@
+===== manual_result_input.py =====
+from datetime import datetime
+
+from result_logger import save_result
+from stats_calculator import calculate_stats, load_match_records, print_stats
+
+
+def add_manual_result(result: str) -> None:
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    save_result(
+        result=result,
+        score=None,
+        margin=None,
+        scores={
+            "lose": None,
+            "none": None,
+            "win": None,
+        },
+        timestamp=timestamp,
+    )
+
+    print(f"[MANUAL] {timestamp} -> {result} 繧定ｿｽ蜉縺励∪縺励◆縲・)
+
+
+def show_stats() -> None:
+    try:
+        records = load_match_records()
+        stats = calculate_stats(records)
+        print_stats(stats)
+    except FileNotFoundError:
+        print("[STATS ERROR] match_results.csv 縺瑚ｦ九▽縺九ｊ縺ｾ縺帙ｓ縲・)
+    except Exception as e:
+        print(f"[STATS ERROR] 謌ｦ邵ｾ髮・ｨ医↓螟ｱ謨励＠縺ｾ縺励◆: {e}")
+
+
+def main() -> None:
+    print("======================================")
+    print("Tekken8 Manual Result Input")
+    print("======================================")
+    print("1: WIN繧定ｿｽ蜉")
+    print("2: LOSE繧定ｿｽ蜉")
+    print("3: 謌ｦ邵ｾ陦ｨ遉ｺ")
+    print("q: 邨ゆｺ・)
+    print("======================================")
+
+    while True:
+        command = input("> ").strip().lower()
+
+        if command == "1":
+            add_manual_result("WIN")
+            show_stats()
+
+        elif command == "2":
+            add_manual_result("LOSE")
+            show_stats()
+
+        elif command == "3":
+            show_stats()
+
+        elif command == "q":
+            print("[INFO] 邨ゆｺ・＠縺ｾ縺励◆縲・)
+            break
+
+        else:
+            print("[ERROR] 1 / 2 / 3 / q 縺ｮ縺・★繧後°繧貞・蜉帙＠縺ｦ縺上□縺輔＞縲・)
+
+
+if __name__ == "__main__":
+    main()
+
+===== stats_calculator.py =====
+from __future__ import annotations
+
+import csv
+from dataclasses import dataclass
+from pathlib import Path
+
+
+# ==============================
+# 險ｭ螳・
+# ==============================
+
+DEFAULT_LOG_PATH = Path("logs") / "match_results.csv"
+
+
+# ==============================
+# 繝・・繧ｿ讒矩
+# ==============================
+
+@dataclass
+class MatchRecord:
+    timestamp: str
+    result: str
+    score: float | None = None
+    margin: float | None = None
+
+
+@dataclass
+class MatchStats:
+    total_matches: int
+    win_count: int
+    lose_count: int
+    win_rate: float
+    current_streak_result: str | None
+    current_streak_count: int
+    max_win_streak: int
+    max_lose_streak: int
+    duplicate_rows_skipped: int
+
+
+# ==============================
+# CSV隱ｭ縺ｿ霎ｼ縺ｿ
+# ==============================
+
+def _to_float(value: str | None) -> float | None:
+    """
+    CSV縺ｮ譁・ｭ怜・繧断loat縺ｫ螟画鋤縺吶ｋ縲・
+    遨ｺ谺・ｄ荳肴ｭ｣縺ｪ蛟､縺ｮ蝣ｴ蜷医・ None 繧定ｿ斐☆縲・
+    """
+    if value is None:
+        return None
+
+    value = value.strip()
+
+    if value == "":
+        return None
+
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def load_match_records(log_path: Path = DEFAULT_LOG_PATH) -> tuple[list[MatchRecord], int]:
+    """
+    match_results.csv 繧定ｪｭ縺ｿ霎ｼ縺ｿ縲｀atchRecord 縺ｮ繝ｪ繧ｹ繝医↓螟画鋤縺吶ｋ縲・
+
+    蜷御ｸ蜀・ｮｹ縺ｮ螳悟・驥崎､・｡後・繧ｹ繧ｭ繝・・縺吶ｋ縲・
+    縺薙ｌ縺ｯ縲∵､懆ｨｼ荳ｭ縺ｫ蜷後§邨先棡縺碁｣邯壻ｿ晏ｭ倥＆繧後◆蝣ｴ蜷医・髮・ｨ医ぜ繝ｬ繧帝∩縺代ｋ縺溘ａ縲・
+    """
+    if not log_path.exists():
+        raise FileNotFoundError(f"繝ｭ繧ｰ繝輔ぃ繧､繝ｫ縺瑚ｦ九▽縺九ｊ縺ｾ縺帙ｓ: {log_path}")
+
+    records: list[MatchRecord] = []
+    seen_rows: set[tuple[str, str, str, str]] = set()
+    duplicate_rows_skipped = 0
+
+    with log_path.open("r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+
+        for row in reader:
+            timestamp = (row.get("timestamp") or "").strip()
+            result = (row.get("result") or "").strip().upper()
+            score_text = (row.get("score") or "").strip()
+            margin_text = (row.get("margin") or "").strip()
+
+            if result not in {"WIN", "LOSE"}:
+                continue
+
+            row_key = (
+                timestamp,
+                result,
+                score_text,
+                margin_text,
+            )
+
+            if row_key in seen_rows:
+                duplicate_rows_skipped += 1
+                continue
+
+            seen_rows.add(row_key)
+
+            records.append(
+                MatchRecord(
+                    timestamp=timestamp,
+                    result=result,
+                    score=_to_float(score_text),
+                    margin=_to_float(margin_text),
+                )
+            )
+
+    return records, duplicate_rows_skipped
+
+
+# ==============================
+# 髮・ｨ亥・逅・
+# ==============================
+
+def calculate_stats(
+    records: list[MatchRecord],
+    duplicate_rows_skipped: int = 0,
+) -> MatchStats:
+    """
+    MatchRecord縺ｮ荳隕ｧ縺九ｉ謌ｦ邵ｾ繧帝寔險医☆繧九・
+    """
+    total_matches = len(records)
+
+    win_count = sum(1 for record in records if record.result == "WIN")
+    lose_count = sum(1 for record in records if record.result == "LOSE")
+
+    if total_matches > 0:
+        win_rate = win_count / total_matches * 100
+    else:
+        win_rate = 0.0
+
+    current_streak_result = None
+    current_streak_count = 0
+
+    if records:
+        current_streak_result = records[-1].result
+
+        for record in reversed(records):
+            if record.result == current_streak_result:
+                current_streak_count += 1
+            else:
+                break
+
+    max_win_streak = 0
+    max_lose_streak = 0
+
+    current_result = None
+    current_count = 0
+
+    for record in records:
+        if record.result == current_result:
+            current_count += 1
+        else:
+            current_result = record.result
+            current_count = 1
+
+        if current_result == "WIN":
+            max_win_streak = max(max_win_streak, current_count)
+        elif current_result == "LOSE":
+            max_lose_streak = max(max_lose_streak, current_count)
+
+    return MatchStats(
+        total_matches=total_matches,
+        win_count=win_count,
+        lose_count=lose_count,
+        win_rate=win_rate,
+        current_streak_result=current_streak_result,
+        current_streak_count=current_streak_count,
+        max_win_streak=max_win_streak,
+        max_lose_streak=max_lose_streak,
+        duplicate_rows_skipped=duplicate_rows_skipped,
+    )
+
+
+# ==============================
+# 陦ｨ遉ｺ
+# ==============================
+
+def format_current_streak(stats: MatchStats) -> str:
+    """
+    迴ｾ蝨ｨ縺ｮ騾｣蜍・騾｣謨励ｒ陦ｨ遉ｺ逕ｨ譁・ｭ怜・縺ｫ螟画鋤縺吶ｋ縲・
+    """
+    if stats.current_streak_result is None:
+        return "縺ｪ縺・
+
+    if stats.current_streak_result == "WIN":
+        return f"{stats.current_streak_count}騾｣蜍・
+
+    if stats.current_streak_result == "LOSE":
+        return f"{stats.current_streak_count}騾｣謨・
+
+    return "縺ｪ縺・
+
+
+def print_stats(stats: MatchStats) -> None:
+    """
+    謌ｦ邵ｾ繧単owerShell縺ｫ陦ｨ遉ｺ縺吶ｋ縲・
+    """
+    print("======================================")
+    print("Match Stats")
+    print("======================================")
+    print(f"邱剰ｩｦ蜷域焚: {stats.total_matches}")
+    print(f"WIN     : {stats.win_count}")
+    print(f"LOSE    : {stats.lose_count}")
+    print(f"蜍晉紫    : {stats.win_rate:.1f}%")
+    print(f"迴ｾ蝨ｨ    : {format_current_streak(stats)}")
+    print(f"譛螟ｧ騾｣蜍・ {stats.max_win_streak}")
+    print(f"譛螟ｧ騾｣謨・ {stats.max_lose_streak}")
+
+    if stats.duplicate_rows_skipped > 0:
+        print("--------------------------------------")
+        print(f"驥崎､・せ繧ｭ繝・・: {stats.duplicate_rows_skipped} 陦・)
+
+    print("======================================")
+
+
+# ==============================
+# 繝｡繧､繝ｳ蜃ｦ逅・
+# ==============================
+
+def main() -> None:
+    log_path = DEFAULT_LOG_PATH
+
+    print(f"[INFO] 隱ｭ縺ｿ霎ｼ縺ｿ蟇ｾ雎｡: {log_path}")
+
+    try:
+        records, duplicate_rows_skipped = load_match_records(log_path)
+
+        if not records:
+            print("[WARN] 髮・ｨ医〒縺阪ｋWIN/LOSE險倬鹸縺後≠繧翫∪縺帙ｓ縲・)
+            return
+
+        stats = calculate_stats(
+            records=records,
+            duplicate_rows_skipped=duplicate_rows_skipped,
+        )
+
+        print_stats(stats)
+
+    except FileNotFoundError as e:
+        print(f"[ERROR] {e}")
+        print("[INFO] 蜈医↓ capture_classifier.py 縺ｧ隧ｦ蜷育ｵ先棡繧定ｨ倬鹸縺励※縺上□縺輔＞縲・)
+
+
+if __name__ == "__main__":
+    main()
+
+===== result_logger.py =====
+from __future__ import annotations
+
+import csv
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+
+# 菫晏ｭ伜・
+LOG_DIR = Path("logs")
+DEFAULT_LOG_PATH = LOG_DIR / "match_results.csv"
+
+
+# CSV縺ｮ蛻・
+FIELDNAMES = [
+    "timestamp",
+    "result",
+    "score",
+    "margin",
+    "lose_score",
+    "none_score",
+    "win_score",
+]
+
+
+def _format_float(value: Optional[float]) -> str:
+    """
+    float繧辰SV菫晏ｭ倥＠繧・☆縺・枚蟄怜・縺ｫ螟画鋤縺吶ｋ縲・
+    None縺ｮ蝣ｴ蜷医・遨ｺ譁・ｭ励↓縺吶ｋ縲・
+    """
+    if value is None:
+        return ""
+    return f"{value:.3f}"
+
+
+def save_result(
+    result: str,
+    score: float,
+    margin: float,
+    scores: Optional[dict[str, float]] = None,
+    timestamp: Optional[str] = None,
+    log_path: Path = DEFAULT_LOG_PATH,
+) -> None:
+    """
+    WIN / LOSE 縺ｮ讀懷・邨先棡繧辰SV縺ｫ霑ｽ險倥☆繧九・
+
+    Parameters
+    ----------
+    result:
+        "WIN" 縺ｾ縺溘・ "LOSE"
+    score:
+        謗｡逕ｨ縺輔ｌ縺溷愛螳壹Λ繝吶Ν縺ｮ繧ｹ繧ｳ繧｢
+    margin:
+        1菴阪→2菴阪・繧ｹ繧ｳ繧｢蟾ｮ
+    scores:
+        {"lose": ..., "none": ..., "win": ...} 縺ｮ繧医≧縺ｪ蜷・Λ繝吶Ν縺ｮ繧ｹ繧ｳ繧｢
+    timestamp:
+        謖・ｮ壹＠縺ｪ縺・ｴ蜷医・迴ｾ蝨ｨ譎ょ綾繧定・蜍輔〒蜈･繧後ｋ
+    log_path:
+        菫晏ｭ伜・CSV繝輔ぃ繧､繝ｫ
+    """
+    result = result.upper()
+
+    if result not in {"WIN", "LOSE"}:
+        raise ValueError(f"result must be 'WIN' or 'LOSE'. got: {result}")
+
+    if scores is None:
+        scores = {}
+
+    if timestamp is None:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    file_exists = log_path.exists()
+
+    row = {
+        "timestamp": timestamp,
+        "result": result,
+        "score": _format_float(score),
+        "margin": _format_float(margin),
+        "lose_score": _format_float(scores.get("lose")),
+        "none_score": _format_float(scores.get("none")),
+        "win_score": _format_float(scores.get("win")),
+    }
+
+    with log_path.open("a", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+
+        if not file_exists:
+            writer.writeheader()
+
+        writer.writerow(row)
+
+
+def main() -> None:
+    """
+    result_logger.py 蜊倅ｽ薙・蜍穂ｽ懃｢ｺ隱咲畑縲・
+    logs/test_match_results.csv 縺ｫ繝・せ繝郁ｨ倬鹸繧呈嶌縺崎ｾｼ繧縲・
+    """
+    test_log_path = LOG_DIR / "test_match_results.csv"
+
+    save_result(
+        result="WIN",
+        score=4.059,
+        margin=4.547,
+        scores={
+            "lose": -0.49,
+            "none": -2.10,
+            "win": 4.059,
+        },
+        log_path=test_log_path,
+    )
+
+    save_result(
+        result="LOSE",
+        score=5.849,
+        margin=6.798,
+        scores={
+            "lose": 5.849,
+            "none": -2.85,
+            "win": -0.95,
+        },
+        log_path=test_log_path,
+    )
+
+    print("繝・せ繝井ｿ晏ｭ倥′螳御ｺ・＠縺ｾ縺励◆縲・)
+    print(f"菫晏ｭ伜・: {test_log_path}")
+
+
+if __name__ == "__main__":
+    main()
+
+===== capture_classifier.py =====
+import time
+from datetime import datetime
+from pathlib import Path
+
+from debug_image_saver import (
+    save_candidate_roi,
+    save_detection_roi,
+    save_rejected_roi,
+)
+from result_logger import save_result
+from stats_calculator import calculate_stats, load_match_records, print_stats
+
+import cv2
+import joblib
+import mss
+import numpy as np
+
+
+# ==============================
+# 險ｭ螳・
+# ==============================
+
+MODEL_PATH = Path("models") / "win_lose_none_hog_svm.pkl"
+
+# 莉･蜑阪・迺ｰ蠅・〒縺ｯ sct.monitors[2] 縺碁延諡ｳ8縺ｮ逕ｻ髱｢縺ｧ縺励◆縲・
+# 驕輔≧逕ｻ髱｢縺梧丐繧句ｴ蜷医・ 1 繧・3 縺ｫ螟画峩縺励∪縺吶・
+MONITOR_INDEX = 2
+
+# 蛻､螳夐俣髫・
+# 0.15遘偵↑繧・遘偵↓邏・縲・蝗槫愛螳壹＠縺ｾ縺吶・
+DETECT_INTERVAL_SECONDS = 0.15
+
+# ROI險ｭ螳・
+# dataset_collector.py 縺ｨ蜷後§險ｭ螳壹↓縺励∪縺吶・
+ROI_WIDTH_RATIO = 0.55
+ROI_HEIGHT_RATIO = 0.32
+ROI_Y_OFFSET_RATIO = 0.02
+
+# WIN / LOSE 縺ｮ隱､蛻､螳壹ｒ貂帙ｉ縺吶◆繧√・螳牙・蛻､螳・
+USE_SAFE_THRESHOLD = True
+MIN_WIN_LOSE_SCORE = 1.5
+MIN_WIN_LOSE_MARGIN = 1.5
+
+# 菴募屓騾｣邯壹〒蜷後§ WIN / LOSE 縺悟・縺溘ｉ遒ｺ螳壽桶縺・↓縺吶ｋ縺・
+# 隱､蛻､螳壼ｯｾ遲悶→縺励※縲・蝗槭□縺代〒縺ｯ遒ｺ螳壹＠縺ｾ縺帙ｓ縲・
+STABLE_REQUIRED_COUNT = 2
+
+# NONE 縺御ｽ募屓邯壹＞縺溘ｉ縲∵ｬ｡縺ｮ蜍晄風讀懷・繧定ｨｱ蜿ｯ縺吶ｋ縺・
+NONE_RESET_REQUIRED_COUNT = 3
+
+# 蜷後§蜍晄風逕ｻ髱｢縺ｧ騾｣邯夊ｨ倬鹸縺励↑縺・◆繧√・譛菴弱け繝ｼ繝ｫ繝繧ｦ繝ｳ遘呈焚
+EVENT_COOLDOWN_SECONDS = 8.0
+
+# ==============================
+# pending謨第ｸ医Ο繧ｸ繝・け險ｭ螳・
+# ==============================
+# 1蝗槭□縺大・縺滄ｫ倥せ繧ｳ繧｢WIN/LOSE繧呈焚遘偵□縺台ｿ晉蕗縺励・
+# 遏ｭ譎る俣蜀・↓蜷後§蛟呵｣懊′繧ゅ≧荳蠎ｦ蜃ｺ縺溷ｴ蜷医↓遒ｺ螳壹☆繧九・
+USE_PENDING_RESCUE = True
+
+# WIN逕ｨpending譚｡莉ｶ
+# WIN縺ｯ豈碑ｼ・噪螳牙ｮ壹＠縺ｦ縺・ｋ縺溘ａ縲∬ｪ､讀懃衍繧帝∩縺代ｋ縺溘ａ縺ｫ諷朱㍾縺ｪ縺ｾ縺ｾ縺ｫ縺吶ｋ縲・
+WIN_PENDING_MIN_SCORE = 2.5
+WIN_PENDING_MIN_MARGIN = 3.0
+
+# LOSE逕ｨpending譚｡莉ｶ
+# LOSE縺ｯ蜿悶ｊ縺薙⊂縺励′螟壹＞縺溘ａ縲仝IN繧医ｊ蟆代＠邱ｩ繧√↓縺吶ｋ縲・
+LOSE_PENDING_MIN_SCORE = 1.5
+LOSE_PENDING_MIN_MARGIN = 1.8
+
+# pending蛟呵｣懊ｒ菫晄戟縺吶ｋ遘呈焚
+# 3繝ｩ繧ｦ繝ｳ繝牙・蜿悶・螳滓姶縺ｧ縺ｯLOSE蛟呵｣懊′髢馴囈繧堤ｩｺ縺代※蜃ｺ繧九％縺ｨ縺後≠繧九◆繧√∝ｰ代＠髟ｷ繧√↓縺吶ｋ縲・
+PENDING_EXPIRE_SECONDS = 6.0
+
+# pending蛟呵｣懊′菴募屓蜃ｺ縺溘ｉ遒ｺ螳壹☆繧九°
+# 2縺ｪ繧峨・蝗槭□縺代〒縺ｯ險倬鹸縺励↑縺・・
+PENDING_REQUIRED_COUNT = 2
+
+# candidates / rejected 縺ｮ菫晏ｭ倩ｨｭ螳・
+SAVE_CANDIDATE_IMAGES = True
+SAVE_REJECTED_IMAGES = True
+
+# 菫晏ｭ倥＠縺吶℃髦ｲ豁｢縺ｮ縺溘ａ縲∝酔縺倡ｨｮ鬘槭・菫晏ｭ倥・譛菴弱％縺ｮ遘呈焚縺縺醍ｩｺ縺代ｋ
+DEBUG_IMAGE_SAVE_INTERVAL_SECONDS = 1.0
+
+# candidates / rejected 縺ｨ縺励※菫晏ｭ倥☆繧区怙菴弱せ繧ｳ繧｢
+MIN_CANDIDATE_SAVE_SCORE = 1.5
+MIN_REJECTED_SAVE_SCORE = 1.5
+
+# 繝励Ξ繝薙Η繝ｼ繧定｡ｨ遉ｺ縺吶ｋ縺・
+SHOW_PREVIEW = True
+
+WINDOW_NAME = "Tekken8 Capture Classifier"
+
+
+# ==============================
+# 繝｢繝・Ν隱ｭ縺ｿ霎ｼ縺ｿ
+# ==============================
+
+def load_model():
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(f"繝｢繝・Ν縺瑚ｦ九▽縺九ｊ縺ｾ縺帙ｓ: {MODEL_PATH}")
+
+    payload = joblib.load(MODEL_PATH)
+
+    required_keys = [
+        "model",
+        "label_encoder",
+        "image_width",
+        "image_height",
+        "hog_win_size",
+        "hog_block_size",
+        "hog_block_stride",
+        "hog_cell_size",
+        "hog_nbins",
+    ]
+
+    for key in required_keys:
+        if key not in payload:
+            raise KeyError(f"繝｢繝・Ν繝輔ぃ繧､繝ｫ縺ｫ蠢・ｦ√↑諠・ｱ縺後≠繧翫∪縺帙ｓ: {key}")
+
+    return payload
+
+
+def create_hog(payload):
+    hog = cv2.HOGDescriptor(
+        tuple(payload["hog_win_size"]),
+        tuple(payload["hog_block_size"]),
+        tuple(payload["hog_block_stride"]),
+        tuple(payload["hog_cell_size"]),
+        int(payload["hog_nbins"]),
+    )
+
+    return hog
+
+
+# ==============================
+# 逕ｻ髱｢繧ｭ繝｣繝励メ繝｣
+# ==============================
+
+def get_monitor(sct):
+    monitors = sct.monitors
+
+    print("======================================")
+    print("蛻ｩ逕ｨ蜿ｯ閭ｽ縺ｪ繝｢繝九ち繝ｼ荳隕ｧ")
+    print("======================================")
+
+    for index, monitor in enumerate(monitors):
+        print(f"[{index}] {monitor}")
+
+    print("======================================")
+
+    if MONITOR_INDEX < len(monitors):
+        print(f"[INFO] MONITOR_INDEX={MONITOR_INDEX} 繧剃ｽｿ逕ｨ縺励∪縺吶・)
+        return monitors[MONITOR_INDEX]
+
+    print(f"[WARN] MONITOR_INDEX={MONITOR_INDEX} 縺瑚ｦ九▽縺九ｊ縺ｾ縺帙ｓ縲・)
+    print("[WARN] 莉｣繧上ｊ縺ｫ MONITOR_INDEX=1 繧剃ｽｿ逕ｨ縺励∪縺吶・)
+    return monitors[1]
+
+
+def crop_center_roi(frame):
+    height, width = frame.shape[:2]
+
+    roi_width = int(width * ROI_WIDTH_RATIO)
+    roi_height = int(height * ROI_HEIGHT_RATIO)
+
+    center_x = width // 2
+    center_y = height // 2 + int(height * ROI_Y_OFFSET_RATIO)
+
+    x1 = center_x - roi_width // 2
+    y1 = center_y - roi_height // 2
+    x2 = x1 + roi_width
+    y2 = y1 + roi_height
+
+    x1 = max(0, x1)
+    y1 = max(0, y1)
+    x2 = min(width, x2)
+    y2 = min(height, y2)
+
+    roi = frame[y1:y2, x1:x2]
+
+    return roi, (x1, y1, x2, y2)
+
+
+# ==============================
+# 逕ｻ蜒丞・逅・・蛻・｡・
+# ==============================
+
+def preprocess_image(image, image_width, image_height):
+    resized = cv2.resize(
+        image,
+        (image_width, image_height),
+        interpolation=cv2.INTER_AREA,
+    )
+
+    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+    gray = cv2.equalizeHist(gray)
+
+    return gray
+
+
+def extract_hog_feature(image, hog, image_width, image_height):
+    processed = preprocess_image(image, image_width, image_height)
+    feature = hog.compute(processed)
+
+    if feature is None:
+        raise ValueError("HOG迚ｹ蠕ｴ驥上ｒ菴懈・縺ｧ縺阪∪縺帙ｓ縺ｧ縺励◆縲・)
+
+    return feature.flatten().astype(np.float32)
+
+
+def apply_safe_threshold(raw_label, class_names, scores):
+    if not USE_SAFE_THRESHOLD:
+        return raw_label, "threshold_disabled"
+
+    if raw_label == "none":
+        return "none", "raw_none"
+
+    score_pairs = []
+
+    for class_name, score in zip(class_names, scores):
+        score_pairs.append((class_name, float(score)))
+
+    score_pairs.sort(key=lambda x: x[1], reverse=True)
+
+    _best_label, best_score = score_pairs[0]
+    _second_label, second_score = score_pairs[1]
+
+    margin = best_score - second_score
+
+    if raw_label in ["win", "lose"]:
+        if best_score < MIN_WIN_LOSE_SCORE:
+            return "none", f"low_score:{best_score:.3f}"
+
+        if margin < MIN_WIN_LOSE_MARGIN:
+            return "none", f"low_margin:{margin:.3f}"
+
+    return raw_label, f"accepted:score={best_score:.3f},margin={margin:.3f}"
+
+
+def classify_roi(roi, payload, hog):
+    model = payload["model"]
+    label_encoder = payload["label_encoder"]
+
+    image_width = int(payload["image_width"])
+    image_height = int(payload["image_height"])
+
+    feature = extract_hog_feature(
+        image=roi,
+        hog=hog,
+        image_width=image_width,
+        image_height=image_height,
+    )
+
+    X = np.array([feature], dtype=np.float32)
+
+    raw_pred_encoded = model.predict(X)[0]
+    raw_label = label_encoder.inverse_transform([raw_pred_encoded])[0]
+
+    if hasattr(model, "decision_function"):
+        scores = model.decision_function(X)[0]
+    else:
+        scores = np.zeros(len(label_encoder.classes_), dtype=np.float32)
+
+    class_names = list(label_encoder.classes_)
+
+    final_label, reason = apply_safe_threshold(
+        raw_label=raw_label,
+        class_names=class_names,
+        scores=scores,
+    )
+
+    score_dict = {
+        class_name: float(score)
+        for class_name, score in zip(class_names, scores)
+    }
+
+    return {
+        "raw_label": raw_label,
+        "final_label": final_label,
+        "reason": reason,
+        "scores": score_dict,
+    }
+
+
+def get_score_and_margin(result, label):
+    scores = result["scores"]
+    label = label.lower()
+
+    score = scores.get(label)
+
+    sorted_scores = sorted(scores.values(), reverse=True)
+
+    if len(sorted_scores) >= 2:
+        margin = sorted_scores[0] - sorted_scores[1]
+    else:
+        margin = 0.0
+
+    return score, margin
+
+
+# ==============================
+# 繧､繝吶Φ繝育｢ｺ螳壹Ο繧ｸ繝・け
+# ==============================
+
+def clear_pending_state(state):
+    state["pending_label"] = None
+    state["pending_count"] = 0
+    state["pending_first_time"] = 0.0
+    state["pending_last_time"] = 0.0
+
+
+def get_pending_thresholds(label):
+    """
+    WIN/LOSE縺斐→縺ｫpending譚｡莉ｶ繧定ｿ斐☆縲・
+    WIN縺ｯ諷朱㍾縲´OSE縺ｯ蜿悶ｊ縺薙⊂縺玲舞貂医・縺溘ａ蟆代＠邱ｩ繧√・
+    """
+    if label == "win":
+        return WIN_PENDING_MIN_SCORE, WIN_PENDING_MIN_MARGIN
+
+    if label == "lose":
+        return LOSE_PENDING_MIN_SCORE, LOSE_PENDING_MIN_MARGIN
+
+    return None, None
+
+
+def is_pending_candidate(result):
+    """
+    pending謨第ｸ医・蟇ｾ雎｡縺ｫ縺励※繧医＞WIN/LOSE縺九ｒ蛻､螳壹☆繧九・
+    1蝗槭□縺代〒縺ｯ險倬鹸縺帙★縲∫洒譎る俣蜀・↓蜷後§蛟呵｣懊′蜀榊ｺｦ蜃ｺ縺溷ｴ蜷医□縺第舞貂医☆繧九・
+    """
+    if not USE_PENDING_RESCUE:
+        return False
+
+    final_label = result["final_label"]
+
+    if final_label not in ["win", "lose"]:
+        return False
+
+    min_score, min_margin = get_pending_thresholds(final_label)
+
+    if min_score is None or min_margin is None:
+        return False
+
+    score, margin = get_score_and_margin(
+        result=result,
+        label=final_label,
+    )
+
+    if score is None:
+        return False
+
+    if score < min_score:
+        return False
+
+    if margin < min_margin:
+        return False
+
+    return True
+
+
+def update_pending_state(result, state, current_time):
+    """
+    鬮倅ｿ｡鬆ｼ蛟呵｣懊ｒpending縺ｨ縺励※菫晄戟縺吶ｋ縲・
+    騾｣邯壹＠縺ｦ縺・↑縺上※繧ゅ∽ｸ螳夂ｧ呈焚莉･蜀・↓蜷後§蛟呵｣懊′蜀榊ｺｦ蜃ｺ縺溘ｉcount繧帝ｲ繧√ｋ縲・
+    """
+    final_label = result["final_label"]
+
+    # 蜿､縺аending縺ｯ遐ｴ譽・
+    if state["pending_label"] is not None:
+        elapsed = current_time - state["pending_first_time"]
+
+        if elapsed > PENDING_EXPIRE_SECONDS:
+            clear_pending_state(state)
+
+    if not is_pending_candidate(result):
+        return False, state
+
+    # 蜷後§蛟呵｣懊′譛滄剞蜀・↓蜀榊ｺｦ蜃ｺ縺溷ｴ蜷・
+    if state["pending_label"] == final_label:
+        state["pending_count"] += 1
+        state["pending_last_time"] = current_time
+
+    # 譁ｰ縺励＞蛟呵｣懊・蝣ｴ蜷・
+    else:
+        state["pending_label"] = final_label
+        state["pending_count"] = 1
+        state["pending_first_time"] = current_time
+        state["pending_last_time"] = current_time
+
+    pending_ready = state["pending_count"] >= PENDING_REQUIRED_COUNT
+
+    return pending_ready, state
+
+
+def update_event_state(result, state):
+    final_label = result["final_label"]
+    current_time = time.time()
+
+    detected_event = None
+
+    # pending縺悟商縺上↑縺｣縺ｦ縺・◆繧画ｶ医☆
+    if state["pending_label"] is not None:
+        elapsed = current_time - state["pending_first_time"]
+
+        if elapsed > PENDING_EXPIRE_SECONDS:
+            clear_pending_state(state)
+
+    if final_label in ["win", "lose"]:
+        state["none_count"] = 0
+
+        if state["stable_label"] == final_label:
+            state["stable_count"] += 1
+        else:
+            state["stable_label"] = final_label
+            state["stable_count"] = 1
+
+        cooldown_ok = (
+            current_time - state["last_event_time"]
+            >= EVENT_COOLDOWN_SECONDS
+        )
+
+        normal_ready = (
+            state["stable_count"] >= STABLE_REQUIRED_COUNT
+        )
+
+        pending_ready, state = update_pending_state(
+            result=result,
+            state=state,
+            current_time=current_time,
+        )
+
+        if (
+            not state["event_active"]
+            and cooldown_ok
+            and (normal_ready or pending_ready)
+        ):
+            detected_event = final_label
+            state["event_active"] = True
+            state["last_event_time"] = current_time
+
+            if normal_ready:
+                state["last_detect_reason"] = "normal_stable"
+            elif pending_ready:
+                state["last_detect_reason"] = "pending_rescue"
+            else:
+                state["last_detect_reason"] = "unknown"
+
+            clear_pending_state(state)
+
+    else:
+        state["none_count"] += 1
+
+        if state["none_count"] >= NONE_RESET_REQUIRED_COUNT:
+            state["stable_label"] = None
+            state["stable_count"] = 0
+            state["event_active"] = False
+
+    return detected_event, state
+
+
+# ==============================
+# 陦ｨ遉ｺ繝ｻ菫晏ｭ・
+# ==============================
+
+def format_scores(scores):
+    parts = []
+
+    for label, score in sorted(scores.items()):
+        parts.append(f"{label}:{score:.2f}")
+
+    return " ".join(parts)
+
+
+def print_current_stats():
+    """
+    CSV縺ｫ菫晏ｭ俶ｸ医∩縺ｮ隧ｦ蜷育ｵ先棡繧定ｪｭ縺ｿ霎ｼ縺ｿ縲∫樟蝨ｨ縺ｮ謌ｦ邵ｾ繧定｡ｨ遉ｺ縺吶ｋ縲・
+    CSV菫晏ｭ伜ｾ後↓蜻ｼ縺ｳ蜃ｺ縺呎Φ螳壹・
+    """
+    try:
+        records, duplicate_rows_skipped = load_match_records()
+
+        if not records:
+            print("[STATS] 髮・ｨ医〒縺阪ｋWIN/LOSE險倬鹸縺後≠繧翫∪縺帙ｓ縲・)
+            return
+
+        stats = calculate_stats(
+            records=records,
+            duplicate_rows_skipped=duplicate_rows_skipped,
+        )
+
+        print_stats(stats)
+
+    except FileNotFoundError:
+        print("[STATS ERROR] match_results.csv 縺瑚ｦ九▽縺九ｊ縺ｾ縺帙ｓ縲・)
+    except Exception as e:
+        print(f"[STATS ERROR] 謌ｦ邵ｾ髮・ｨ医↓螟ｱ謨励＠縺ｾ縺励◆: {e}")
+
+
+def print_detected_event(timestamp, detected_event, result, state):
+    print("")
+    print("======================================")
+    print(f"[DETECTED] {timestamp} -> {detected_event.upper()}")
+    print(f"detect_reason: {state.get('last_detect_reason', '')}")
+    print(f"reason: {result['reason']}")
+    print(f"scores: {format_scores(result['scores'])}")
+    print("======================================")
+    print("")
+
+
+def save_detection_debug_image(roi, detected_event, score, margin, reason):
+    try:
+        saved_image_path = save_detection_roi(
+            image=roi,
+            label=detected_event,
+            score=score,
+            margin=margin,
+            reason=reason,
+        )
+
+        print(f"[DEBUG IMAGE] detection ROI saved: {saved_image_path}")
+
+    except Exception as e:
+        print(f"[DEBUG IMAGE ERROR] detection ROI菫晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆: {e}")
+
+
+def save_candidate_debug_image(roi, label, score, margin, reason):
+    try:
+        saved_image_path = save_candidate_roi(
+            image=roi,
+            label=label,
+            score=score,
+            margin=margin,
+            reason=reason,
+        )
+
+        print(f"[DEBUG IMAGE] candidate ROI saved: {saved_image_path}")
+
+    except Exception as e:
+        print(f"[DEBUG IMAGE ERROR] candidate ROI菫晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆: {e}")
+
+
+def save_rejected_debug_image(roi, label, score, margin, reason):
+    try:
+        saved_image_path = save_rejected_roi(
+            image=roi,
+            label=label,
+            score=score,
+            margin=margin,
+            reason=reason,
+        )
+
+        print(f"[DEBUG IMAGE] rejected ROI saved: {saved_image_path}")
+
+    except Exception as e:
+        print(f"[DEBUG IMAGE ERROR] rejected ROI菫晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆: {e}")
+
+
+def can_save_debug_image(debug_save_state, key):
+    current_time = time.time()
+    last_save_time = debug_save_state.get(key, 0.0)
+
+    if current_time - last_save_time < DEBUG_IMAGE_SAVE_INTERVAL_SECONDS:
+        return False
+
+    debug_save_state[key] = current_time
+    return True
+
+
+def maybe_save_candidate_or_rejected(
+    roi,
+    result,
+    detected_event,
+    state,
+    debug_save_state,
+):
+    """
+    DETECTED縺ｫ縺ｯ縺ｪ繧峨↑縺九▲縺溘′縲仝IN/LOSE縺ｫ霑代＞ROI繧剃ｿ晏ｭ倥☆繧九・
+
+    candidates:
+        final_label 縺・win/lose 縺縺後‥etected_event 縺ｫ縺ｯ縺ｪ繧峨↑縺九▲縺溽判蜒上・
+
+    rejected:
+        raw_label 縺ｯ win/lose 縺縺後《core/margin荳崎ｶｳ縺ｧ final_label 縺・none 縺ｫ縺ｪ縺｣縺溽判蜒上・
+    """
+    if detected_event is not None:
+        return
+
+    # 縺吶〒縺ｫ1隧ｦ蜷亥・繧呈､懷・貂医∩縺ｮ髢薙・縲∝酔縺倥Μ繧ｶ繝ｫ繝育判髱｢繧貞呵｣懊→縺励※菫晏ｭ倥＠縺ｪ縺・
+    if state["event_active"]:
+        return
+
+    raw_label = result["raw_label"]
+    final_label = result["final_label"]
+    reason = result["reason"]
+
+    if (
+        SAVE_REJECTED_IMAGES
+        and raw_label in ["win", "lose"]
+        and final_label == "none"
+    ):
+        score, margin = get_score_and_margin(
+            result=result,
+            label=raw_label,
+        )
+
+        if score is not None and score >= MIN_REJECTED_SAVE_SCORE:
+            key = f"rejected_{raw_label}"
+
+            if can_save_debug_image(debug_save_state, key):
+                save_rejected_debug_image(
+                    roi=roi,
+                    label=raw_label,
+                    score=score,
+                    margin=margin,
+                    reason=reason,
+                )
+
+        return
+
+    if (
+        SAVE_CANDIDATE_IMAGES
+        and final_label in ["win", "lose"]
+        and state["stable_count"] == 1
+    ):
+        score, margin = get_score_and_margin(
+            result=result,
+            label=final_label,
+        )
+
+        if score is not None and score >= MIN_CANDIDATE_SAVE_SCORE:
+            key = f"candidate_{final_label}"
+
+            if can_save_debug_image(debug_save_state, key):
+                save_candidate_debug_image(
+                    roi=roi,
+                    label=final_label,
+                    score=score,
+                    margin=margin,
+                    reason=reason,
+                )
+
+
+def save_match_result_to_csv(detected_event, score, margin, scores, timestamp):
+    try:
+        save_result(
+            result=detected_event.upper(),
+            score=score,
+            margin=margin,
+            scores=scores,
+            timestamp=timestamp,
+        )
+
+        print_current_stats()
+
+    except Exception as e:
+        print(f"[LOGGER ERROR] CSV菫晏ｭ倥↓螟ｱ謨励＠縺ｾ縺励◆: {e}")
+
+
+# ==============================
+# 繝励Ξ繝薙Η繝ｼ陦ｨ遉ｺ
+# ==============================
+
+def draw_preview(frame, roi_box, result, state):
+    preview = frame.copy()
+
+    x1, y1, x2, y2 = roi_box
+
+    final_label = result["final_label"]
+    raw_label = result["raw_label"]
+
+    if final_label == "win":
+        color = (0, 255, 0)
+    elif final_label == "lose":
+        color = (0, 0, 255)
+    else:
+        color = (255, 255, 255)
+
+    cv2.rectangle(preview, (x1, y1), (x2, y2), color, 2)
+
+    line1 = f"raw={raw_label} final={final_label}"
+    line2 = (
+        f"stable={state['stable_label']} "
+        f"count={state['stable_count']} "
+        f"active={state['event_active']}"
+    )
+    line3 = (
+        f"pending={state['pending_label']} "
+        f"count={state['pending_count']} "
+        f"reason={state['last_detect_reason']}"
+    )
+    line4 = result["reason"]
+    line5 = format_scores(result["scores"])
+    line6 = "Press Q to quit"
+
+    lines = [line1, line2, line3, line4, line5, line6]
+
+    y = 35
+
+    for line in lines:
+        cv2.putText(
+            preview,
+            line,
+            (30, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.75,
+            color,
+            2,
+            cv2.LINE_AA,
+        )
+
+        y += 35
+
+    return preview
+
+
+def resize_for_display(image, display_width=960):
+    height, width = image.shape[:2]
+
+    scale = display_width / width
+    display_height = int(height * scale)
+
+    resized = cv2.resize(
+        image,
+        (display_width, display_height),
+        interpolation=cv2.INTER_AREA,
+    )
+
+    return resized
+
+
+def show_preview(frame, roi_box, result, state):
+    if not SHOW_PREVIEW:
+        return False
+
+    preview = draw_preview(
+        frame=frame,
+        roi_box=roi_box,
+        result=result,
+        state=state,
+    )
+
+    preview_resized = resize_for_display(preview)
+    cv2.imshow(WINDOW_NAME, preview_resized)
+
+    key = cv2.waitKey(1) & 0xFF
+
+    if key == ord("q"):
+        print("[INFO] Q繧ｭ繝ｼ縺ｧ邨ゆｺ・＠縺ｾ縺励◆縲・)
+        return True
+
+    return False
+
+
+# ==============================
+# 繝｡繧､繝ｳ蜃ｦ逅・
+# ==============================
+
+def main():
+    print("======================================")
+    print("Tekken8 Capture Classifier")
+    print("======================================")
+    print(f"繝｢繝・Ν: {MODEL_PATH}")
+    print(f"蛻､螳夐俣髫・ {DETECT_INTERVAL_SECONDS} 遘・)
+    print(f"螳牙ｮ壼愛螳壼屓謨ｰ: {STABLE_REQUIRED_COUNT}")
+    print(f"繧ｯ繝ｼ繝ｫ繝繧ｦ繝ｳ: {EVENT_COOLDOWN_SECONDS} 遘・)
+    print(f"pending謨第ｸ・ {USE_PENDING_RESCUE}")
+    print(
+        "WIN pending譚｡莉ｶ: "
+        f"score>={WIN_PENDING_MIN_SCORE}, "
+        f"margin>={WIN_PENDING_MIN_MARGIN}"
+    )
+    print(
+        "LOSE pending譚｡莉ｶ: "
+        f"score>={LOSE_PENDING_MIN_SCORE}, "
+        f"margin>={LOSE_PENDING_MIN_MARGIN}"
+    )
+    print(f"pending菫晄戟遘呈焚: {PENDING_EXPIRE_SECONDS} 遘・)
+    print(f"pending蠢・ｦ∝屓謨ｰ: {PENDING_REQUIRED_COUNT}")
+    print("邨ゆｺ・婿豕・ 繝励Ξ繝薙Η繝ｼ逕ｻ髱｢縺ｧ Q縲√∪縺溘・ PowerShell 縺ｧ Ctrl + C")
+    print("======================================")
+    print("")
+
+    payload = load_model()
+    hog = create_hog(payload)
+
+    state = {
+        "stable_label": None,
+        "stable_count": 0,
+        "none_count": 0,
+        "event_active": False,
+        "last_event_time": 0.0,
+
+        # pending謨第ｸ育畑
+        "pending_label": None,
+        "pending_count": 0,
+        "pending_first_time": 0.0,
+        "pending_last_time": 0.0,
+        "last_detect_reason": "",
+    }
+
+    debug_save_state = {}
+
+    last_detect_time = 0.0
+    last_result = {
+        "raw_label": "none",
+        "final_label": "none",
+        "reason": "not_started",
+        "scores": {},
+    }
+
+    try:
+        with mss.MSS() as sct:
+            monitor = get_monitor(sct)
+
+            while True:
+                screenshot = sct.grab(monitor)
+
+                frame = np.array(screenshot)
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+
+                roi, roi_box = crop_center_roi(frame)
+
+                current_time = time.time()
+
+                # 蜑榊屓縺ｮ讀懷・繧､繝吶Φ繝医ｒ谺｡縺ｮ繝ｫ繝ｼ繝励↓謖√■雜翫＆縺ｪ縺・
+                detected_event = None
+                result = last_result
+
+                if current_time - last_detect_time >= DETECT_INTERVAL_SECONDS:
+                    result = classify_roi(
+                        roi=roi,
+                        payload=payload,
+                        hog=hog,
+                    )
+
+                    detected_event, state = update_event_state(
+                        result=result,
+                        state=state,
+                    )
+
+                    maybe_save_candidate_or_rejected(
+                        roi=roi,
+                        result=result,
+                        detected_event=detected_event,
+                        state=state,
+                        debug_save_state=debug_save_state,
+                    )
+
+                    last_result = result
+                    last_detect_time = current_time
+
+                if detected_event is not None:
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                    score, margin = get_score_and_margin(
+                        result=result,
+                        label=detected_event,
+                    )
+
+                    print_detected_event(
+                        timestamp=timestamp,
+                        detected_event=detected_event,
+                        result=result,
+                        state=state,
+                    )
+
+                    save_detection_debug_image(
+                        roi=roi,
+                        detected_event=detected_event,
+                        score=score,
+                        margin=margin,
+                        reason=result["reason"],
+                    )
+
+                    save_match_result_to_csv(
+                        detected_event=detected_event,
+                        score=score,
+                        margin=margin,
+                        scores=result["scores"],
+                        timestamp=timestamp,
+                    )
+
+                should_quit = show_preview(
+                    frame=frame,
+                    roi_box=roi_box,
+                    result=last_result,
+                    state=state,
+                )
+
+                if should_quit:
+                    break
+
+    except KeyboardInterrupt:
+        print("")
+        print("[INFO] Ctrl + C 縺ｧ邨ゆｺ・＠縺ｾ縺励◆縲・)
+
+    finally:
+        cv2.destroyAllWindows()
+        print("")
+        print("[INFO] 邨ゆｺ・＠縺ｾ縺励◆縲・)
+
+
+if __name__ == "__main__":
+    main()
