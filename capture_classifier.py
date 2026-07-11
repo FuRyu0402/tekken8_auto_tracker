@@ -1,3 +1,7 @@
+import argparse
+import os
+import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -92,6 +96,14 @@ SHOW_PREVIEW = True
 
 WINDOW_NAME = "Tekken8 Capture Classifier"
 
+DEBUG_IMAGES_DISABLED_ENV = "TEKKEN8_DISABLE_DEBUG_IMAGES"
+ENABLED_ENV_VALUES = {"1", "true", "yes", "on"}
+
+
+def is_debug_image_saving_disabled():
+    value = os.environ.get(DEBUG_IMAGES_DISABLED_ENV, "")
+    return value.strip().lower() in ENABLED_ENV_VALUES
+
 
 # ==============================
 # モデル読み込み
@@ -138,7 +150,16 @@ def create_hog(payload):
 # 画面キャプチャ
 # ==============================
 
-def get_monitor(sct):
+def validate_monitor_index(monitor_index, monitors):
+    if monitor_index < 1 or monitor_index >= len(monitors):
+        raise ValueError(
+            "monitor-indexは1以上かつ利用可能な個別モニター番号である必要があります。"
+            f" 指定値: {monitor_index}, 利用可能範囲: 1..{len(monitors) - 1}"
+        )
+    return monitor_index
+
+
+def get_monitor(sct, monitor_index):
     monitors = sct.monitors
 
     print("======================================")
@@ -150,13 +171,49 @@ def get_monitor(sct):
 
     print("======================================")
 
-    if MONITOR_INDEX < len(monitors):
-        print(f"[INFO] MONITOR_INDEX={MONITOR_INDEX} を使用します。")
-        return monitors[MONITOR_INDEX]
+    validate_monitor_index(monitor_index, monitors)
+    print(f"[INFO] MONITOR_INDEX={monitor_index} を使用します。")
+    return monitors[monitor_index]
 
-    print(f"[WARN] MONITOR_INDEX={MONITOR_INDEX} が見つかりません。")
-    print("[WARN] 代わりに MONITOR_INDEX=1 を使用します。")
-    return monitors[1]
+
+def create_argument_parser():
+    parser = argparse.ArgumentParser(description="Tekken8 auto result tracker")
+    parser.add_argument(
+        "--monitor-index",
+        type=int,
+        default=MONITOR_INDEX,
+        help=f"キャプチャ対象の個別モニター番号 (既定値: {MONITOR_INDEX})",
+    )
+    parser.add_argument(
+        "--no-preview",
+        action="store_true",
+        help="OpenCVプレビューを表示しない",
+    )
+    return parser
+
+
+def listen_for_stop_commands(stop_event, stream=None):
+    """Set the stop event when stdin receives 'stop' or 'quit'."""
+    stream = stream or sys.stdin
+    try:
+        for line in stream:
+            if line.strip().lower() in {"stop", "quit"}:
+                stop_event.set()
+                return
+    except (OSError, ValueError):
+        # A closed/unavailable stdin is equivalent to no remote stop command.
+        return
+
+
+def start_stop_listener(stop_event, stream=None):
+    listener = threading.Thread(
+        target=listen_for_stop_commands,
+        args=(stop_event, stream),
+        daemon=True,
+        name="stdin-stop-listener",
+    )
+    listener.start()
+    return listener
 
 
 def crop_center_roi(frame):
@@ -510,6 +567,9 @@ def print_detected_event(timestamp, detected_event, result, state):
 
 
 def save_detection_debug_image(roi, detected_event, score, margin, reason):
+    if is_debug_image_saving_disabled():
+        return None
+
     try:
         saved_image_path = save_detection_roi(
             image=roi,
@@ -526,6 +586,9 @@ def save_detection_debug_image(roi, detected_event, score, margin, reason):
 
 
 def save_candidate_debug_image(roi, label, score, margin, reason):
+    if is_debug_image_saving_disabled():
+        return None
+
     try:
         saved_image_path = save_candidate_roi(
             image=roi,
@@ -542,6 +605,9 @@ def save_candidate_debug_image(roi, label, score, margin, reason):
 
 
 def save_rejected_debug_image(roi, label, score, margin, reason):
+    if is_debug_image_saving_disabled():
+        return None
+
     try:
         saved_image_path = save_rejected_roi(
             image=roi,
@@ -730,8 +796,8 @@ def resize_for_display(image, display_width=960):
     return resized
 
 
-def show_preview(frame, roi_box, result, state):
-    if not SHOW_PREVIEW:
+def show_preview(frame, roi_box, result, state, preview_enabled=SHOW_PREVIEW):
+    if not preview_enabled:
         return False
 
     preview = draw_preview(
@@ -758,6 +824,7 @@ def show_preview(frame, roi_box, result, state):
 # ==============================
 
 def main():
+    args = create_argument_parser().parse_args()
     print("======================================")
     print("Tekken8 Capture Classifier")
     print("======================================")
@@ -810,11 +877,14 @@ def main():
         "scores": {},
     }
 
+    stop_event = threading.Event()
+    start_stop_listener(stop_event)
+
     try:
         with mss.MSS() as sct:
-            monitor = get_monitor(sct)
+            monitor = get_monitor(sct, args.monitor_index)
 
-            while True:
+            while not stop_event.is_set():
                 screenshot = sct.grab(monitor)
 
                 frame = np.array(screenshot)
@@ -887,7 +957,11 @@ def main():
                     roi_box=roi_box,
                     result=last_result,
                     state=state,
+                    preview_enabled=SHOW_PREVIEW and not args.no_preview,
                 )
+
+                if args.no_preview or not SHOW_PREVIEW:
+                    stop_event.wait(0.001)
 
                 if should_quit:
                     break
