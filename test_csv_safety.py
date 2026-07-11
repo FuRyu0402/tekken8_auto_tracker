@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from csv_file_lock import CsvFileLock, CsvLockTimeoutError, lock_path_for
-from result_logger import FIELDNAMES, save_result, undo_last_result
+from result_logger import FIELDNAMES, clear_all_results, save_result, undo_last_result
 from stats_calculator import get_current_stats
 
 
@@ -114,6 +114,15 @@ class CsvSafetyTest(unittest.TestCase):
                 undo_last_result(self.log_path)
         self.assertEqual(self.log_path.read_bytes(), original)
         self.assertEqual(list(self.log_path.parent.glob(f".{self.log_path.name}.*.tmp")), [])
+
+    def test_clear_without_backup_keeps_lock_and_atomic_replace(self):
+        save_result("WIN", None, None, timestamp="original", log_path=self.log_path)
+        with mock.patch("result_logger.CsvFileLock", wraps=CsvFileLock) as lock_class:
+            with mock.patch("result_logger.os.replace", wraps=__import__("os").replace) as replace:
+                clear_all_results(self.log_path, self.archive_dir, backup=False)
+        lock_class.assert_called_once_with(self.log_path)
+        replace.assert_called_once()
+        self.assertFalse(self.archive_dir.exists())
 
     def test_csv_remains_well_formed_after_concurrency(self):
         with ThreadPoolExecutor(max_workers=6) as executor:

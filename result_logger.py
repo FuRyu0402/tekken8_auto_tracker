@@ -189,13 +189,14 @@ def undo_last_result(log_path: Path = DEFAULT_LOG_PATH) -> Optional[dict[str, st
 def clear_all_results(
     log_path: Path = DEFAULT_LOG_PATH,
     archive_dir: Path = ARCHIVE_DIR,
+    backup: bool = True,
 ) -> Optional[Path]:
-    """Back up the CSV, then replace it with the standard header only."""
+    """Optionally back up the CSV, then replace it with the standard header only."""
     log_path = Path(log_path)
     archive_dir = Path(archive_dir)
     with CsvFileLock(log_path):
         backup_path: Optional[Path] = None
-        if log_path.exists():
+        if backup and log_path.exists():
             archive_dir.mkdir(parents=True, exist_ok=True)
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             backup_path = archive_dir / f"{log_path.stem}_{stamp}{log_path.suffix}"

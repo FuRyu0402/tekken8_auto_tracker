@@ -54,6 +54,17 @@ class ResultOperationsTest(unittest.TestCase):
         with self.csv_path.open("r", encoding="utf-8-sig", newline="") as file:
             self.assertEqual(list(csv.reader(file)), [FIELDNAMES])
 
+    def test_clear_without_backup_does_not_create_archive_and_leaves_header(self):
+        add_manual_result("LOSE", log_path=self.csv_path)
+        archive_dir = self.root / "unused-archive"
+
+        backup = clear_all_results(self.csv_path, archive_dir, backup=False)
+
+        self.assertIsNone(backup)
+        self.assertFalse(archive_dir.exists())
+        with self.csv_path.open("r", encoding="utf-8-sig", newline="") as file:
+            self.assertEqual(list(csv.reader(file)), [FIELDNAMES])
+
     def test_empty_header_only_and_invalid_rows_are_safe(self):
         self.csv_path.parent.mkdir(parents=True)
         self.csv_path.touch()
