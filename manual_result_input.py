@@ -1,23 +1,13 @@
 from datetime import datetime
 
-from result_logger import save_result
+from result_logger import add_manual_result as log_manual_result
 from stats_calculator import calculate_stats, load_match_records, print_stats
 
 
 def add_manual_result(result: str) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    save_result(
-        result=result,
-        score=None,
-        margin=None,
-        scores={
-            "lose": None,
-            "none": None,
-            "win": None,
-        },
-        timestamp=timestamp,
-    )
+    log_manual_result(result=result, timestamp=timestamp)
 
     print(f"[MANUAL] {timestamp} -> {result} を追加しました。")
 
