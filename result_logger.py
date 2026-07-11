@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import csv
+import os
 import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+from csv_file_lock import CsvFileLock
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -58,9 +62,8 @@ def _has_standard_header(rows: list[list[str]]) -> bool:
     return bool(rows) and [value.strip() for value in rows[0]] == FIELDNAMES
 
 
-def read_valid_rows(log_path: Path = DEFAULT_LOG_PATH) -> list[dict[str, str]]:
-    """Return every valid WIN/LOSE row in file order, including duplicates."""
-    rows = _read_rows(Path(log_path))
+def _read_valid_rows_unlocked(log_path: Path) -> list[dict[str, str]]:
+    rows = _read_rows(log_path)
     if not _has_standard_header(rows):
         return []
 
@@ -74,6 +77,41 @@ def read_valid_rows(log_path: Path = DEFAULT_LOG_PATH) -> list[dict[str, str]]:
         if row["result"] in VALID_RESULTS:
             valid_rows.append(row)
     return valid_rows
+
+
+def read_valid_rows(log_path: Path = DEFAULT_LOG_PATH) -> list[dict[str, str]]:
+    """Return every valid WIN/LOSE row in file order, including duplicates."""
+    log_path = Path(log_path)
+    with CsvFileLock(log_path):
+        return _read_valid_rows_unlocked(log_path)
+
+
+def _atomic_write_rows(log_path: Path, rows: list[list[str]]) -> None:
+    """Write rows beside the CSV and atomically replace the destination."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            newline="",
+            encoding="utf-8-sig",
+            dir=log_path.parent,
+            prefix=f".{log_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as file:
+            temp_path = Path(file.name)
+            csv.writer(file).writerows(rows)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_path, log_path)
+        temp_path = None
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def save_result(
@@ -92,19 +130,21 @@ def save_result(
     scores = scores or {}
     timestamp = timestamp or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     log_path = Path(log_path)
-    _ensure_csv(log_path)
-
-    row = {
-        "timestamp": timestamp,
-        "result": result,
-        "score": _format_float(score),
-        "margin": _format_float(margin),
-        "lose_score": _format_float(scores.get("lose")),
-        "none_score": _format_float(scores.get("none")),
-        "win_score": _format_float(scores.get("win")),
-    }
-    with log_path.open("a", newline="", encoding="utf-8-sig") as file:
-        csv.DictWriter(file, fieldnames=FIELDNAMES).writerow(row)
+    with CsvFileLock(log_path):
+        _ensure_csv(log_path)
+        row = {
+            "timestamp": timestamp,
+            "result": result,
+            "score": _format_float(score),
+            "margin": _format_float(margin),
+            "lose_score": _format_float(scores.get("lose")),
+            "none_score": _format_float(scores.get("none")),
+            "win_score": _format_float(scores.get("win")),
+        }
+        with log_path.open("a", newline="", encoding="utf-8-sig") as file:
+            csv.DictWriter(file, fieldnames=FIELDNAMES).writerow(row)
+            file.flush()
+            os.fsync(file.fileno())
 
 
 def add_manual_result(
@@ -119,32 +159,31 @@ def add_manual_result(
 def undo_last_result(log_path: Path = DEFAULT_LOG_PATH) -> Optional[dict[str, str]]:
     """Remove and return the most recent valid WIN/LOSE row."""
     log_path = Path(log_path)
-    rows = _read_rows(log_path)
-    if not _has_standard_header(rows):
-        _ensure_csv(log_path)
-        return None
+    with CsvFileLock(log_path):
+        rows = _read_rows(log_path)
+        if not _has_standard_header(rows):
+            _ensure_csv(log_path)
+            return None
 
-    remove_index: Optional[int] = None
-    removed: Optional[dict[str, str]] = None
-    for index in range(len(rows) - 1, 0, -1):
-        values = rows[index]
-        result = values[1].strip().upper() if len(values) > 1 else ""
-        if result in VALID_RESULTS:
-            remove_index = index
-            removed = {
-                name: values[column].strip() if column < len(values) else ""
-                for column, name in enumerate(FIELDNAMES)
-            }
-            removed["result"] = result
-            break
+        remove_index: Optional[int] = None
+        removed: Optional[dict[str, str]] = None
+        for index in range(len(rows) - 1, 0, -1):
+            values = rows[index]
+            result = values[1].strip().upper() if len(values) > 1 else ""
+            if result in VALID_RESULTS:
+                remove_index = index
+                removed = {
+                    name: values[column].strip() if column < len(values) else ""
+                    for column, name in enumerate(FIELDNAMES)
+                }
+                removed["result"] = result
+                break
 
-    if remove_index is None:
-        return None
-
-    del rows[remove_index]
-    with log_path.open("w", newline="", encoding="utf-8-sig") as file:
-        csv.writer(file).writerows(rows)
-    return removed
+        if remove_index is None:
+            return None
+        del rows[remove_index]
+        _atomic_write_rows(log_path, rows)
+        return removed
 
 
 def clear_all_results(
@@ -154,18 +193,15 @@ def clear_all_results(
     """Back up the CSV, then replace it with the standard header only."""
     log_path = Path(log_path)
     archive_dir = Path(archive_dir)
-    backup_path: Optional[Path] = None
-
-    if log_path.exists():
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        backup_path = archive_dir / f"{log_path.stem}_{stamp}{log_path.suffix}"
-        shutil.copy2(log_path, backup_path)
-
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("w", newline="", encoding="utf-8-sig") as file:
-        csv.DictWriter(file, fieldnames=FIELDNAMES).writeheader()
-    return backup_path
+    with CsvFileLock(log_path):
+        backup_path: Optional[Path] = None
+        if log_path.exists():
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            backup_path = archive_dir / f"{log_path.stem}_{stamp}{log_path.suffix}"
+            shutil.copy2(log_path, backup_path)
+        _atomic_write_rows(log_path, [FIELDNAMES])
+        return backup_path
 
 
 def main() -> None:

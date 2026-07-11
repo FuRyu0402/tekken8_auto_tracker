@@ -1,3 +1,6 @@
+import argparse
+import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -138,7 +141,16 @@ def create_hog(payload):
 # 画面キャプチャ
 # ==============================
 
-def get_monitor(sct):
+def validate_monitor_index(monitor_index, monitors):
+    if monitor_index < 1 or monitor_index >= len(monitors):
+        raise ValueError(
+            "monitor-indexは1以上かつ利用可能な個別モニター番号である必要があります。"
+            f" 指定値: {monitor_index}, 利用可能範囲: 1..{len(monitors) - 1}"
+        )
+    return monitor_index
+
+
+def get_monitor(sct, monitor_index):
     monitors = sct.monitors
 
     print("======================================")
@@ -150,13 +162,44 @@ def get_monitor(sct):
 
     print("======================================")
 
-    if MONITOR_INDEX < len(monitors):
-        print(f"[INFO] MONITOR_INDEX={MONITOR_INDEX} を使用します。")
-        return monitors[MONITOR_INDEX]
+    validate_monitor_index(monitor_index, monitors)
+    print(f"[INFO] MONITOR_INDEX={monitor_index} を使用します。")
+    return monitors[monitor_index]
 
-    print(f"[WARN] MONITOR_INDEX={MONITOR_INDEX} が見つかりません。")
-    print("[WARN] 代わりに MONITOR_INDEX=1 を使用します。")
-    return monitors[1]
+
+def create_argument_parser():
+    parser = argparse.ArgumentParser(description="Tekken8 auto result tracker")
+    parser.add_argument(
+        "--monitor-index",
+        type=int,
+        default=MONITOR_INDEX,
+        help=f"キャプチャ対象の個別モニター番号 (既定値: {MONITOR_INDEX})",
+    )
+    return parser
+
+
+def listen_for_stop_commands(stop_event, stream=None):
+    """Set the stop event when stdin receives 'stop' or 'quit'."""
+    stream = stream or sys.stdin
+    try:
+        for line in stream:
+            if line.strip().lower() in {"stop", "quit"}:
+                stop_event.set()
+                return
+    except (OSError, ValueError):
+        # A closed/unavailable stdin is equivalent to no remote stop command.
+        return
+
+
+def start_stop_listener(stop_event, stream=None):
+    listener = threading.Thread(
+        target=listen_for_stop_commands,
+        args=(stop_event, stream),
+        daemon=True,
+        name="stdin-stop-listener",
+    )
+    listener.start()
+    return listener
 
 
 def crop_center_roi(frame):
@@ -758,6 +801,7 @@ def show_preview(frame, roi_box, result, state):
 # ==============================
 
 def main():
+    args = create_argument_parser().parse_args()
     print("======================================")
     print("Tekken8 Capture Classifier")
     print("======================================")
@@ -810,11 +854,14 @@ def main():
         "scores": {},
     }
 
+    stop_event = threading.Event()
+    start_stop_listener(stop_event)
+
     try:
         with mss.MSS() as sct:
-            monitor = get_monitor(sct)
+            monitor = get_monitor(sct, args.monitor_index)
 
-            while True:
+            while not stop_event.is_set():
                 screenshot = sct.grab(monitor)
 
                 frame = np.array(screenshot)
