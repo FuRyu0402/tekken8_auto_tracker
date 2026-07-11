@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 import threading
 import time
@@ -95,6 +96,14 @@ SHOW_PREVIEW = True
 
 WINDOW_NAME = "Tekken8 Capture Classifier"
 
+DEBUG_IMAGES_DISABLED_ENV = "TEKKEN8_DISABLE_DEBUG_IMAGES"
+ENABLED_ENV_VALUES = {"1", "true", "yes", "on"}
+
+
+def is_debug_image_saving_disabled():
+    value = os.environ.get(DEBUG_IMAGES_DISABLED_ENV, "")
+    return value.strip().lower() in ENABLED_ENV_VALUES
+
 
 # ==============================
 # モデル読み込み
@@ -174,6 +183,11 @@ def create_argument_parser():
         type=int,
         default=MONITOR_INDEX,
         help=f"キャプチャ対象の個別モニター番号 (既定値: {MONITOR_INDEX})",
+    )
+    parser.add_argument(
+        "--no-preview",
+        action="store_true",
+        help="OpenCVプレビューを表示しない",
     )
     return parser
 
@@ -553,6 +567,9 @@ def print_detected_event(timestamp, detected_event, result, state):
 
 
 def save_detection_debug_image(roi, detected_event, score, margin, reason):
+    if is_debug_image_saving_disabled():
+        return None
+
     try:
         saved_image_path = save_detection_roi(
             image=roi,
@@ -569,6 +586,9 @@ def save_detection_debug_image(roi, detected_event, score, margin, reason):
 
 
 def save_candidate_debug_image(roi, label, score, margin, reason):
+    if is_debug_image_saving_disabled():
+        return None
+
     try:
         saved_image_path = save_candidate_roi(
             image=roi,
@@ -585,6 +605,9 @@ def save_candidate_debug_image(roi, label, score, margin, reason):
 
 
 def save_rejected_debug_image(roi, label, score, margin, reason):
+    if is_debug_image_saving_disabled():
+        return None
+
     try:
         saved_image_path = save_rejected_roi(
             image=roi,
@@ -773,8 +796,8 @@ def resize_for_display(image, display_width=960):
     return resized
 
 
-def show_preview(frame, roi_box, result, state):
-    if not SHOW_PREVIEW:
+def show_preview(frame, roi_box, result, state, preview_enabled=SHOW_PREVIEW):
+    if not preview_enabled:
         return False
 
     preview = draw_preview(
@@ -934,7 +957,11 @@ def main():
                     roi_box=roi_box,
                     result=last_result,
                     state=state,
+                    preview_enabled=SHOW_PREVIEW and not args.no_preview,
                 )
+
+                if args.no_preview or not SHOW_PREVIEW:
+                    stop_event.wait(0.001)
 
                 if should_quit:
                     break
