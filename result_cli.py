@@ -26,6 +26,7 @@ def execute(
     command: str,
     log_path: Path = DEFAULT_LOG_PATH,
     archive_dir: Path = ARCHIVE_DIR,
+    backup: bool = True,
 ) -> dict[str, Any]:
     if command == "get-stats":
         return get_current_stats(log_path)
@@ -39,7 +40,7 @@ def execute(
         removed = undo_last_result(log_path)
         return {"removed": removed, "stats": get_current_stats(log_path)}
     if command == "clear":
-        backup_path = clear_all_results(log_path, archive_dir)
+        backup_path = clear_all_results(log_path, archive_dir, backup=backup)
         return {
             "backup_path": str(backup_path) if backup_path else None,
             "stats": get_current_stats(log_path),
@@ -63,6 +64,10 @@ def create_parser() -> argparse.ArgumentParser:
         type=Path,
         default=_path_from_environment("TEKKEN8_ARCHIVE_DIR", ARCHIVE_DIR),
     )
+    backup_group = parser.add_mutually_exclusive_group()
+    backup_group.add_argument("--backup", dest="backup", action="store_true")
+    backup_group.add_argument("--no-backup", dest="backup", action="store_false")
+    parser.set_defaults(backup=True)
     return parser
 
 
@@ -71,7 +76,7 @@ def main() -> int:
         args = create_parser().parse_args()
         response = {
             "ok": True,
-            "data": execute(args.command, args.log_path, args.archive_dir),
+            "data": execute(args.command, args.log_path, args.archive_dir, args.backup),
         }
         print(json.dumps(response, ensure_ascii=False))
         return 0

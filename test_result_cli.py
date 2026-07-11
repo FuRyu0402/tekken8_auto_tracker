@@ -22,7 +22,7 @@ class ResultCliTest(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
-    def run_cli(self, command: str) -> dict:
+    def run_cli(self, command: str, *extra_args: str) -> dict:
         result = subprocess.run(
             [
                 sys.executable,
@@ -32,6 +32,7 @@ class ResultCliTest(unittest.TestCase):
                 str(self.log_path),
                 "--archive-dir",
                 str(self.archive_dir),
+                *extra_args,
             ],
             check=False,
             capture_output=True,
@@ -82,6 +83,22 @@ class ResultCliTest(unittest.TestCase):
         self.assertEqual(backup_path.parent, self.archive_dir)
         self.assertEqual(list(self.archive_dir.glob("*.csv")), [backup_path])
 
+    def test_clear_without_flag_defaults_to_backup(self):
+        self.run_cli("add-win")
+        cleared = self.run_cli("clear")
+        self.assertTrue(Path(cleared["backup_path"]).exists())
+
+    def test_clear_backup_flags_are_explicit(self):
+        self.run_cli("add-win")
+        backed_up = self.run_cli("clear", "--backup")
+        self.assertTrue(Path(backed_up["backup_path"]).exists())
+
+        self.run_cli("add-lose")
+        archive_files_before = list(self.archive_dir.glob("*.csv"))
+        not_backed_up = self.run_cli("clear", "--no-backup")
+        self.assertIsNone(not_backed_up["backup_path"])
+        self.assertEqual(list(self.archive_dir.glob("*.csv")), archive_files_before)
+
     def test_environment_commands_do_not_change_real_paths(self):
         real_csv_before = DEFAULT_LOG_PATH.read_bytes() if DEFAULT_LOG_PATH.exists() else None
         real_archive_before = self._directory_snapshot(ARCHIVE_DIR)
@@ -101,6 +118,7 @@ class ResultCliTest(unittest.TestCase):
             args = create_parser().parse_args(["get-stats"])
         self.assertEqual(args.log_path, DEFAULT_LOG_PATH)
         self.assertEqual(args.archive_dir, ARCHIVE_DIR)
+        self.assertTrue(args.backup)
 
     @staticmethod
     def _directory_snapshot(directory: Path) -> list[tuple[str, int, int]]:
