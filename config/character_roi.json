@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "source_resolution": {
+    "width": 1920,
+    "height": 1080
+  },
+  "roi": {
+    "left": {
+      "x": 38,
+      "y": 0,
+      "width": 157,
+      "height": 109
+    },
+    "right": {
+      "x": 1740,
+      "y": 0,
+      "width": 157,
+      "height": 109
+    }
+  },
+  "display": {
+    "zoom": 1.0,
+    "mode": "color"
+  },
+  "paths": {
+    "source_root": "template_sources",
+    "output_root": "templates/characters"
+  }
+}
