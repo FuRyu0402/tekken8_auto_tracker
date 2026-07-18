@@ -91,6 +91,19 @@ output/
 outputs/
 tmp/
 temp/
+*.tmp
+*.temp
+
+# Character template cropper inputs and generated previews
+template_sources/*
+!template_sources/left/
+!template_sources/right/
+template_sources/left/*
+template_sources/right/*
+!template_sources/left/.gitkeep
+!template_sources/right/.gitkeep
+templates/previews/*
+!templates/previews/.gitkeep
 
 # Hard negative dataset images
 dataset/hard_none/*
